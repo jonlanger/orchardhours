@@ -2,7 +2,9 @@
    Picking — the reach, the fly to the basket, the tally
    ============================================================ */
 import * as THREE from 'three';
-import { APPLE_TYPES, TYPE_KEYS, BASKET_CAPACITY } from '../core/config';
+import { APPLE_TYPES, TYPE_KEYS, BASKET_CAPACITY, BARROW_CAPACITY,
+         REACH_FROM_FEET, PICKER_BONUS } from '../core/config';
+import type { AppleType } from '../core/config';
 import { state, save, basketTotal } from '../core/save';
 import { apples } from '../world/trees';
 import type { Apple } from '../world/trees';
@@ -12,6 +14,48 @@ import { toast, renderBasket } from '../ui/hud';
 
 /** the bounce the bear gives when it reaches; the controller drains it */
 export const bounce = { v: 0 };
+
+/* ============================================================
+   Reach — how high the bear can get an apple down from
+   ============================================================ */
+export function reachHeight(){
+  return character.position.y + REACH_FROM_FEET
+    + (state.equipped === 'picker' ? PICKER_BONUS : 0);
+}
+export function canReach(a: Apple){
+  return a.worldPos.y <= reachHeight() + 0.15;
+}
+/** why not, in a sentence the bear would say */
+export function outOfReach(a: Apple){
+  if(canReach(a)) return null;
+  return state.carried.includes('picker')
+    ? 'That one is up in the canopy — take the pole out first (1).'
+    : 'That one is up in the canopy. The picking pole is on the rack in the barn.';
+}
+
+/* ============================================================
+   Where a picked apple goes
+   ============================================================ */
+export const barrowTotal = () => {
+  const b = state.barrow;
+  return b ? TYPE_KEYS.reduce((n,k)=> n + b.load[k], 0) : 0;
+};
+/** the barrow only takes fruit if it is being pushed, or parked close by */
+export function barrowHandy(){
+  const b = state.barrow;
+  if(!b) return false;
+  if(state.carried.includes('barrow')) return true;
+  return Math.hypot(b.x - character.position.x, b.z - character.position.z) < 4.5;
+}
+export function roomForMore(){
+  return basketTotal() < BASKET_CAPACITY
+    || (barrowHandy() && barrowTotal() < BARROW_CAPACITY);
+}
+function stash(type: AppleType): 'basket' | 'barrow' | null {
+  if(basketTotal() < BASKET_CAPACITY){ state.basket[type]++; return 'basket'; }
+  if(barrowHandy() && barrowTotal() < BARROW_CAPACITY){ state.barrow!.load[type]++; return 'barrow'; }
+  return null;
+}
 
 export function ownerApple(obj: THREE.Object3D | null): Apple | null {
   let o = obj;
@@ -32,7 +76,7 @@ export function startPick(a: Apple){
 }
 
 function finishPick(a: Apple){
-  state.basket[a.type]++;
+  const where = stash(a.type);
   state.picked++;
   if(!state.discovered[a.type]){
     state.discovered[a.type] = true;
@@ -43,7 +87,10 @@ function finishPick(a: Apple){
   renderBasket(a.type);
   updateBasketFruit();
   save();
-  if(basketTotal() >= BASKET_CAPACITY) toast('Basket full — the barn is expecting you');
+  if(where === 'barrow' && barrowTotal() === 1) toast('Basket full — the overflow is going into the barrow');
+  else if(where === null) toast('Nothing left to put it in. Empty the basket at the barrels.');
+  else if(where === 'basket' && basketTotal() >= BASKET_CAPACITY && !barrowHandy())
+    toast('Basket full — the barn is expecting you');
 }
 
 export function updateBasketFruit(){

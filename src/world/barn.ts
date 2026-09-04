@@ -7,7 +7,7 @@ import { scene } from '../core/renderer';
 import { toonMat, addOutline, part, BOX, CYL, SPH } from '../core/materials';
 import { groundHeightAt } from './ground';
 import { APPLE_GEO } from './geometry';
-import { addSolid } from './collision';
+import { addSolid, addPlatform } from './collision';
 import { addCameraBlocker } from '../core/cameraRig';
 
 export const BARN_POS = new THREE.Vector3(BARN_X, 0, BARN_Z);
@@ -25,10 +25,40 @@ export const BRASS      = new THREE.MeshStandardMaterial({ color:0xD9A441, rough
 
 const W = BARN_W, H = BARN_H, D = BARN_D;
 
-const walls = new THREE.Mesh(BOX(W, H, D), BARN_RED);
-walls.position.y = H/2; walls.castShadow = walls.receiveShadow = true;
-addOutline(walls, 1.012);
-barn.add(walls);
+/* ---- the shell: five panels and a doorway, not a solid block ---- */
+export const WALL_T = 0.20;
+export const DOOR_HALF = 1.62;          // the gap the sliding doors cover
+const SEG = (W/2 - DOOR_HALF)/2;        // half-width of each front segment
+
+export const INSIDE = toonMat(0x9A7A52, true);   // planed timber, seen from within
+
+/** every wall panel, so the one in front of the camera can be faded */
+export const wallPanels: { mesh: THREE.Mesh; nx: number; nz: number }[] = [];
+
+function wall(w: number, h: number, d: number, x: number, y: number, z: number, nx: number, nz: number){
+  const m = new THREE.Mesh(BOX(w, h, d), BARN_RED);
+  m.position.set(x, y, z);
+  m.castShadow = m.receiveShadow = true;
+  addOutline(m, 1.012);
+  barn.add(m);
+  wallPanels.push({ mesh:m, nx, nz });
+  /* a thin skin on the inner face, so indoors reads as timber not barn paint */
+  const SKIN = 0.05;
+  const lin = new THREE.Mesh(
+    BOX(nx ? SKIN : w - 0.06, h - 0.06, nz ? SKIN : d - 0.06), INSIDE);
+  lin.position.set(x - nx*(w/2 + SKIN/2 - 0.01), y, z - nz*(d/2 + SKIN/2 - 0.01));
+  lin.receiveShadow = true;
+  barn.add(lin);
+  return m;
+}
+
+wall(W, H, WALL_T, 0, H/2, -D/2 + WALL_T/2, 0, -1);                         // back
+wall(WALL_T, H, D - WALL_T*2, -W/2 + WALL_T/2, H/2, 0, -1, 0);              // left
+wall(WALL_T, H, D - WALL_T*2,  W/2 - WALL_T/2, H/2, 0,  1, 0);              // right
+for(const sx of [-1, 1]){
+  wall(SEG*2, H, WALL_T, sx*(DOOR_HALF + SEG), H/2, D/2 - WALL_T/2, 0, 1);  // either side of the doors
+}
+wall(DOOR_HALF*2, H - 3.2, WALL_T, 0, 3.2 + (H - 3.2)/2, D/2 - WALL_T/2, 0, 1);  // header over the doors
 
 /* plank battens */
 for(let i=-4;i<=4;i++){
@@ -156,8 +186,33 @@ export function barnToWorld(lx: number, lz: number){
 }
 export const BARN_FLOOR_Y = barn.position.y;
 
-/* the shell. Phase four opens a doorway in it. */
-addSolid({ kind:'box', x:barn.position.x, z:barn.position.z, hw:W/2, hd:D/2, ry:BARN_ROT });
+/* the walls, each as its own slab, so the doorway is genuinely open */
+for(const [lx, lz, hw, hd] of [
+  [0, -D/2 + WALL_T/2, W/2, WALL_T/2],                       // back
+  [-W/2 + WALL_T/2, 0, WALL_T/2, D/2],                       // left
+  [ W/2 - WALL_T/2, 0, WALL_T/2, D/2],                       // right
+  [-(DOOR_HALF + SEG), D/2 - WALL_T/2, SEG, WALL_T/2],       // front, left of the doors
+  [ (DOOR_HALF + SEG), D/2 - WALL_T/2, SEG, WALL_T/2],       // front, right of the doors
+] as const){
+  const p = barnToWorld(lx, lz);
+  addSolid({ kind:'box', x:p.x, z:p.z, hw, hd, ry:BARN_ROT });
+}
+
+/* the plank floor, a step up off the yard */
+export const FLOOR_TOP = BARN_FLOOR_Y + 0.14;
+addPlatform({
+  x: barn.position.x, z: barn.position.z, ry: BARN_ROT,
+  hw: W/2 - WALL_T, hd: D/2 - WALL_T, top: FLOOR_TOP,
+});
+
+/** is this point in under the barn roof? */
+export function insideBarn(x: number, z: number){
+  const dx = x - barn.position.x, dz = z - barn.position.z;
+  const a = -BARN_ROT;
+  const lx = dx*Math.cos(a) - dz*Math.sin(a);
+  const lz = dx*Math.sin(a) + dz*Math.cos(a);
+  return Math.abs(lx) < W/2 && Math.abs(lz) < D/2;
+}
 
 /* the silo */
 {

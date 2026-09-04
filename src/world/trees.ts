@@ -165,6 +165,17 @@ function buildTree(x: number, z: number, scale: number, index: number){
         tip.z + (Math.random()-0.5)*0.9*scale));
     }
   }
+  /* --- and the crop up in the canopy, which only a pole will reach --- */
+  {
+    const nHigh = 4 + Math.floor(Math.random()*3);
+    for(let i=0;i<nHigh;i++){
+      const a = (i/nHigh)*Math.PI*2 + Math.random()*0.7;
+      const rr = core.scale.x*(0.55 + Math.random()*0.42);
+      const yy = core.position.y + (Math.random()-0.35)*core.scale.y*1.15;
+      spots.push(new THREE.Vector3(Math.cos(a)*rr, Math.max(REACH_Y + 0.45, yy), Math.sin(a)*rr));
+    }
+  }
+
   /* plus whatever hangs low off the main canopy's skirt */
   const skirtY = core.position.y - core.scale.y*0.90;
   if(skirtY < 3.4*scale){
@@ -282,6 +293,25 @@ export function updateTrees(dt: number, time: number, camPos: THREE.Vector3, foc
     }
     fadeGroup(u, blocking ? 0.16 : 1, dt, state.settings.outlines);
   }
+}
+
+/**
+ * Overnight the trees set again. A pruned tree, opened to the light, brings
+ * back most of what came off it; an unpruned one only some.
+ */
+export function regrowOvernight(){
+  let back = 0;
+  for(const a of apples){
+    if(!a.picked || a.anim) continue;
+    const chance = treeData(a.treeGroup).pruned ? 0.75 : 0.30;
+    if(Math.random() > chance) continue;
+    a.picked = false;
+    a.group.visible = true;
+    a.group.scale.setScalar(APPLE_SCALE);
+    a.group.position.copy(a.home);
+    back++;
+  }
+  return back;
 }
 
 /** put every picked apple back on the branch */

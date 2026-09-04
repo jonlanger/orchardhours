@@ -55,7 +55,7 @@
   .count.bump{ animation:bump .45s ease; }
   @keyframes bump{ 0%{transform:scale(1)} 35%{transform:scale(1.5); color:var(--accent-deep)} 100%{transform:scale(1)} }
 
-  .hint{ position:absolute; bottom:24px; left:50%; transform:translateX(-50%);
+  .hint{ position:absolute; bottom:86px; left:50%; transform:translateX(-50%);
     font-size:clamp(12px,2vw,14.5px); color:#4a3220; padding:7px 16px; border-radius:20px;
     transition:opacity .6s ease; text-align:center; white-space:nowrap; }
   .toast{ position:absolute; top:74px; left:50%; transform:translateX(-50%) translateY(-8px);
@@ -148,7 +148,7 @@
     .basket-row{ flex-direction:column; align-items:center; gap:3px; margin:0; }
     .basket-row > span:nth-child(2){ display:none; }
     .count{ margin:0; font-size:12px; }
-    .hint{ white-space:normal; max-width:86vw; bottom:16px; }
+    .hint{ white-space:normal; max-width:70vw; bottom:70px; }
     .sheet-head{ padding:14px 16px 12px; gap:10px; }
     .sheet-head h2{ font-size:19px; }
     .tabs{ padding:10px 12px 0; overflow-x:auto; -webkit-overflow-scrolling:touch; }
@@ -162,3 +162,33 @@
   /* ---- ledger fill bars ---- */
   .stat .bar{ margin-top:8px; height:5px; border-radius:4px; background:rgba(120,88,50,.18); overflow:hidden; }
   .stat .bar i{ display:block; height:100%; border-radius:4px; transition:width .5s cubic-bezier(.2,.8,.2,1); }
+
+  /* ---- the interaction prompt ---- */
+  .prompt{ position:absolute; left:50%; bottom:86px; transform:translate(-50%, 6px);
+    font-size:14px; padding:8px 16px; border-radius:20px; white-space:nowrap;
+    opacity:0; pointer-events:none; transition:opacity .18s ease, transform .18s cubic-bezier(.2,.8,.2,1); }
+  .prompt.on{ opacity:1; transform:translate(-50%, 0); pointer-events:auto; cursor:pointer; }
+  .prompt b{ display:inline-block; font-weight:400; font-size:11.5px; letter-spacing:.06em;
+    background:var(--accent-deep); color:#FFF6E6; border-radius:6px; padding:2px 7px; margin-right:9px;
+    vertical-align:1px; }
+
+  /* ---- the tool belt ---- */
+  .belt{ position:absolute; left:14px; bottom:16px; display:flex; gap:7px; pointer-events:auto; }
+  .slot{ width:52px; height:56px; border-radius:13px; cursor:pointer; position:relative;
+    border:1px solid var(--line); background:linear-gradient(180deg, rgba(255,250,238,.90), rgba(243,230,205,.86));
+    box-shadow:0 3px 0 rgba(120,88,50,0.16), var(--shadow); backdrop-filter:blur(6px);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+    transition:transform .14s ease, box-shadow .18s ease, opacity .2s ease; }
+  .slot svg{ width:26px; height:26px; display:block; }
+  .slot i{ font-style:normal; font-size:10px; letter-spacing:.06em; color:var(--ink-soft); }
+  .slot.away{ opacity:.34; }
+  .slot.on{ border-color:var(--accent-deep); box-shadow:0 0 0 1px rgba(158,63,43,.35), var(--shadow);
+    transform:translateY(-3px); background:linear-gradient(180deg,#FFFDF6,#F6E8CE); }
+  .slot:hover{ transform:translateY(-2px); }
+  @media (max-width:620px){
+    .belt{ left:8px; bottom:10px; gap:5px; }
+    .slot{ width:42px; height:46px; border-radius:11px; }
+    .slot svg{ width:21px; height:21px; }
+    .slot i{ display:none; }
+    .prompt{ bottom:70px; font-size:13px; max-width:70vw; white-space:normal; }
+  }

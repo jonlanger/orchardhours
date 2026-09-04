@@ -38,6 +38,17 @@ export function toast(msg: string){
   toastTimer = setTimeout(()=> t.classList.remove('on'), 3400);
 }
 
+
+/* ---- the interaction prompt ---- */
+let promptText: string | null = null;
+export function setPrompt(text: string | null){
+  if(text === promptText) return;
+  promptText = text;
+  const el = $('prompt');
+  if(text){ el.innerHTML = `<b>E</b> ${text}`; el.classList.add('on'); hideHint(); }
+  else el.classList.remove('on');
+}
+
 let hintShown = true;
 export function hideHint(){
   if(hintShown){ $('hint').style.opacity = '0'; hintShown = false; }

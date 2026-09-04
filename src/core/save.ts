@@ -84,6 +84,10 @@ export function load(){
   }catch{ /* a corrupt save should not cost you the game */ }
 }
 
+/* the season is read back the moment this module is pulled in, so every world
+   module that follows sees the saved state rather than a fresh one */
+load();
+
 export function resetSeason(){
   try{ localStorage.removeItem(SAVE_KEY); localStorage.removeItem(SAVE_KEY_V2); }catch{ /* ignore */ }
   TYPE_KEYS.forEach(k => { state.stored[k] = 0; state.basket[k] = 0; });

@@ -20,7 +20,7 @@ const GRAVITY = 15, JUMP_V = 5.6;
 const BODY_RADIUS = 0.34;
 const ARRIVE_EPS = 0.14;
 
-export type Mode = 'ground' | 'air';
+export type Mode = 'ground' | 'air' | 'ladder';
 
 export const player = {
   vel: new THREE.Vector3(),   // horizontal only
@@ -30,10 +30,31 @@ export const player = {
   speed: 0,
 };
 
+/* ---- up a ladder ---- */
+interface Climb { x: number; z: number; base: number; top: number; ry: number }
+let climb: Climb | null = null;
+const CLIMB_SPEED = 1.9;
+
+export const climbing = () => climb !== null;
+export function startClimb(x: number, z: number, base: number, top: number, ry: number){
+  climb = { x, z, base, top, ry };
+  stopWalking();
+  player.vel.set(0,0,0);
+  player.vy = 0;
+  player.grounded = false;
+  character.position.y = Math.max(character.position.y, base);
+}
+export function stopClimb(hop = false){
+  if(!climb) return;
+  climb = null;
+  player.vy = hop ? 3.0 : 0;
+  player.grounded = false;
+}
+
 let moveTarget: THREE.Vector3 | null = null;
 let queuedApple: Apple | null = null;
 let queuedBarn = false;
-let walkT = 0, squash = 0, hop = 0, hopV = 0;
+let walkT = 0, rungT = 0, squash = 0, hop = 0, hopV = 0;
 
 export function walkTo(p: THREE.Vector3){
   moveTarget = p.clone();
@@ -56,6 +77,12 @@ const _want = new THREE.Vector3(), _tmp = new THREE.Vector3();
 
 export function updateController(dt: number, time: number){
   const busy = picking();
+
+  if(climb){
+    updateClimb(dt);
+    animate(dt, time);
+    return;
+  }
 
   /* ---- what the bear is being asked to do ---- */
   _want.set(0,0,0);
@@ -123,11 +150,53 @@ export function updateController(dt: number, time: number){
   animate(dt, time);
 }
 
+function updateClimb(dt: number){
+  const c = climb!;
+  const p = character.position;
+
+  p.y += moveAxis.y*CLIMB_SPEED*dt;
+  if(p.y > c.top){ p.y = c.top; }
+  if(p.y <= c.base + 0.02 && moveAxis.y < 0){
+    p.y = c.base;
+    stopClimb();
+    return;
+  }
+  if(pressed('jump')){ stopClimb(true); return; }
+
+  p.x += (c.x - p.x)*Math.min(1, dt*8);
+  p.z += (c.z - p.z)*Math.min(1, dt*8);
+
+  let d = c.ry - character.rotation.y;
+  while(d > Math.PI) d -= Math.PI*2;
+  while(d < -Math.PI) d += Math.PI*2;
+  character.rotation.y += d*Math.min(1, dt*8);
+
+  player.mode = 'ladder';
+  player.speed = Math.abs(moveAxis.y)*CLIMB_SPEED;
+  player.vel.set(0,0,0);
+}
+
 /* ============================================================
    Pose
    ============================================================ */
 function animate(dt: number, time: number){
   const gaitAmt = Math.min(1.25, player.speed / WALK_SPEED);
+
+  if(climb){
+    /* hand over hand, one rung at a time */
+    rungT += player.speed*dt*2.6;
+    const s = Math.sin(rungT);
+    rig.armR.rotation.x = -2.1 + s*0.5;
+    rig.armL.rotation.x = -2.1 - s*0.5;
+    ease(rig.legL, 'x', -0.5 + s*0.35, dt*10);
+    ease(rig.legR, 'x', -0.5 - s*0.35, dt*10);
+    rig.torso.rotation.z *= 0.9;
+    rig.head.rotation.x += (0.18 - rig.head.rotation.x)*Math.min(1, dt*6);
+    rig.basket.rotation.z += (0.05 - rig.basket.rotation.z)*Math.min(1, dt*6);
+    bearRoot.position.y = 0;
+    bearRoot.scale.set(1,1,1);
+    return;
+  }
 
   if(!player.grounded){
     /* tucked in the air, arms lifted */

@@ -6,27 +6,29 @@ import './style.css';
 import * as THREE from 'three';
 
 import { renderer, scene, camera } from './core/renderer';
-import { load, save, state } from './core/save';
+import { save, state } from './core/save';
 import { addPre, addPost, addFixed, addFrame, start, step } from './core/loop';
 import * as input from './core/input';
 import { applySettings } from './core/settings';
 
-import { updateDay, followCamera } from './world/sky';
-import { updateTrees } from './world/trees';
+import { updateDay, followCamera, onNewDay } from './world/sky';
+import { updateTrees, regrowOvernight, apples, trees } from './world/trees';
 import { updateProps } from './world/props';
-import './world/barn';
+import * as barn from './world/barn';
+import { updateBarnInterior, refreshBarrels } from './world/barnInterior';
 
 import { character, rig } from './player/rig';
-import { updateController, player, walkTo } from './player/controller';
-import { updatePicking, updateBasketFruit } from './player/picking';
+import { updateController, player, walkTo, walkToApple, startClimb } from './player/controller';
+import { updatePicking, updateBasketFruit, canReach } from './player/picking';
 import { initInteraction } from './player/interaction';
+import * as interact from './player/interact';
+import * as tools from './player/tools';
 import { updateCamera, focus, cam, recenterBehind } from './core/cameraRig';
 
-import { renderBasket, setHint, hideHint, hintIsShown, $ } from './ui/hud';
-import { initOverlays, openBarn, openMenu, closeOverlays, overlayOpen } from './ui/overlays';
+import { renderBasket, setHint, hideHint, hintIsShown, toast, $ } from './ui/hud';
+import { initOverlays, openBarn, openMenu, closeOverlays, overlayOpen, deposit } from './ui/overlays';
 
 /* ---- boot ---- */
-load();
 applySettings();
 renderBasket();
 updateBasketFruit();
@@ -47,11 +49,24 @@ addFixed((dt) => {
   updatePicking(dt);
 });
 
+addFrame((dt) => {
+  tools.updateTools(dt);
+  interact.updateInteract();
+});
+
+onNewDay(day => {
+  const back = regrowOvernight();
+  toast(back
+    ? `Day ${day}. The trees have set ${back} more apples overnight.`
+    : `Day ${day} in the orchard.`);
+});
+
 addFrame((dt, time) => {
   updateDay(dt, character.position);
   updateCamera(dt);
   updateTrees(dt, time, camera.position, focus);
   updateProps(dt, time);
+  updateBarnInterior(dt, camera.position);
   followCamera();
 });
 
@@ -71,7 +86,8 @@ declare global {
 }
 window.OH = {
   THREE, scene, camera, renderer, state, character, rig, $,
-  cam, player, walkTo, recenterBehind,
+  cam, player, walkTo, walkToApple, startClimb, recenterBehind,
+  apples, trees, barn, tools, interact, canReach, refreshBarrels, deposit,
   /** advance the world by hand — used by automated checks */
   step: (s = 1) => step(s, () => renderer.render(scene, camera)),
 };

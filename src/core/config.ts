@@ -29,6 +29,12 @@ export const TYPE_WEIGHTS: [AppleType, number][] =
   [['honeycrisp',0.34],['grannysmith',0.29],['golden',0.31],['rare',0.06]];
 
 export const BASKET_CAPACITY = 24;
+export const BARROW_CAPACITY = 60;
+
+/** how high a bear on the ground can reach, measured from its feet */
+export const REACH_FROM_FEET = 3.3;
+/** what the picking pole adds to that */
+export const PICKER_BONUS = 3.4;
 export const CRATE_CAPACITY  = 60;
 
 /* orchard planting plan — real rows */

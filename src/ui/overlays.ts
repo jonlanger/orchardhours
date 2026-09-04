@@ -151,14 +151,22 @@ export function initOverlays(){
   });
 }
 
-/** tip the basket into the barrels; the barn interior calls this */
-export function deposit(only: AppleType | null){
+/**
+ * Tip the basket — and the barrow, if it is standing there too — into the
+ * barrels. The barn interior calls this when you press E at one.
+ */
+export function deposit(only: AppleType | null, includeBarrow = false){
   let moved = 0;
   for(const k of TYPE_KEYS){
     if(only && k !== only) continue;
     moved += state.basket[k];
     state.stored[k] += state.basket[k];
     state.basket[k] = 0;
+    if(includeBarrow && state.barrow){
+      moved += state.barrow.load[k];
+      state.stored[k] += state.barrow.load[k];
+      state.barrow.load[k] = 0;
+    }
   }
   if(!moved) return 0;
   state.deposited += moved;

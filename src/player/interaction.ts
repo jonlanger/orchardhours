@@ -2,14 +2,13 @@
    Pointing at the world — tap an apple, the barn, or the ground
    ============================================================ */
 import * as THREE from 'three';
-import { BASKET_CAPACITY } from '../core/config';
 import { camera } from '../core/renderer';
-import { basketTotal } from '../core/save';
+
 import { onTap } from '../core/input';
 import { apples } from '../world/trees';
 import { groundMesh } from '../world/ground';
 import { barn } from '../world/barn';
-import { ownerApple } from './picking';
+import { ownerApple, roomForMore, outOfReach } from './picking';
 import { walkTo, walkToApple, walkToBarn } from './controller';
 import { toast, hideHint } from '../ui/hud';
 
@@ -31,12 +30,15 @@ export function initInteraction(){
     const dB = hitBarn ? hitBarn.distance : Infinity;
 
     if(dA < dB && hitApple){
-      if(basketTotal() >= BASKET_CAPACITY){
+      const a = ownerApple(hitApple.object);
+      if(!a) return;
+      if(!roomForMore()){
         toast('The basket will not hold another — take it to the barn');
         return;
       }
-      const a = ownerApple(hitApple.object);
-      if(a){ walkToApple(a); hideHint(); }
+      const why = outOfReach(a);
+      if(why){ toast(why); return; }
+      walkToApple(a); hideHint();
       return;
     }
     if(dB < dA && hitBarn){ walkToBarn(); hideHint(); return; }

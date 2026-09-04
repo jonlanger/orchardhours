@@ -87,10 +87,12 @@ export function updateCamera(dt: number){
     ray.set(target, rayDir);
     ray.far = dist + 0.5;
     const hit = ray.intersectObjects(blockers, true)[0];
-    if(hit && hit.distance < dist) dist = Math.max(1.6, hit.distance - 0.35);
+    if(hit && hit.distance < dist) dist = Math.max(0.55, hit.distance - 0.40);
   }
   /* pulling in snaps, easing back out is gentle — no lurching in doorways */
   cam.dist = dist < cam.dist ? dist : cam.dist + (dist - cam.dist)*Math.min(1, dt*3);
+  /* nose-to-nose with the bear helps nobody: lift the eye and look over it */
+  if(cam.dist < 3.0) cam.pitch = Math.max(cam.pitch, 0.22 + (3.0 - cam.dist)*0.26);
 
   desired.multiplyScalar(cam.dist).add(target);
 
