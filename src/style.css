@@ -135,6 +135,8 @@
   @media (max-width:620px){
     .topleft{ top:10px; left:10px; gap:6px; }
     .btn{ padding:8px 11px; font-size:13px; border-radius:11px; }
+    .topleft .btn .lbl{ display:none; }
+    .topleft .btn .gl{ font-size:17px; }
     .title{ top:auto; bottom:80px; background:none; padding:0; }
     .title h1{ display:none; }
     .title .sub{ font-size:10.5px; letter-spacing:.14em; }
@@ -207,3 +209,27 @@
   @media (max-width:620px){
     .minimap{ width:104px; right:8px; bottom:10px; border-radius:11px; }
   }
+
+  /* ---- touch controls ---- */
+  .stick{ position:absolute; left:20px; bottom:88px; width:118px; height:118px; border-radius:50%;
+    pointer-events:auto; touch-action:none; display:none;
+    background:radial-gradient(circle at 50% 45%, rgba(255,250,238,.62), rgba(243,230,205,.40));
+    border:1px solid var(--line); box-shadow:inset 0 2px 10px rgba(120,88,50,.18); }
+  .stick i{ position:absolute; left:50%; top:50%; width:52px; height:52px; margin:-26px 0 0 -26px;
+    border-radius:50%; background:linear-gradient(180deg,#FFFAEF,#EDDCBC);
+    border:1px solid var(--line); box-shadow:0 3px 8px rgba(70,45,22,.25); }
+  .touch-btns{ position:absolute; right:18px; bottom:96px; display:none; gap:12px;
+    align-items:flex-end; pointer-events:auto; }
+  .tbtn{ font:inherit; font-size:17px; color:var(--ink); width:60px; height:60px; border-radius:50%;
+    background:linear-gradient(180deg,#FFFAEF,#F0E1C4); border:1px solid var(--line);
+    box-shadow:0 3px 0 rgba(120,88,50,0.20), var(--shadow); touch-action:none; }
+  .tbtn.big{ width:74px; height:74px; font-size:20px; }
+  .tbtn:active{ transform:translateY(2px); box-shadow:0 1px 0 rgba(120,88,50,0.18); }
+  body.touch .stick, body.touch .touch-btns{ display:flex; }
+  /* on a phone the thumbs own the bottom corners, so everything else moves up */
+  body.touch .stick{ left:16px; bottom:22px; }
+  body.touch .touch-btns{ right:16px; bottom:26px; }
+  body.touch .belt{ left:50%; transform:translateX(-50%); bottom:124px; }
+  body.touch .minimap{ right:8px; bottom:190px; width:92px; }
+  body.touch .hint, body.touch .prompt{ bottom:190px; max-width:58vw; }
+  body.touch .title{ top:64px; bottom:auto; }

@@ -17,6 +17,7 @@ import {
   doorLeaves, insideBarn, wallPanels, TRIM, ROOF_MAT, BARN_RED, INSIDE,
 } from './barn';
 import { character } from '../player/rig';
+import { startClimb } from '../player/controller';
 import { addInteractable } from '../player/interact';
 import { carrying, putBack, take, setRackSpot, setBarrowHome, TOOLS, TOOL_ORDER } from '../player/tools';
 import { barrowHandy, barrowTotal } from '../player/picking';
@@ -88,17 +89,16 @@ const LOFT_Y = 2.65, LOFT_Z = -D/2 + 2.1, LOFT_D = 3.6;
   addSolid({ kind:'circle', x:lw.x, z:lw.z, r:0.46, top:FLOOR_TOP + 0.84 });
 
   /* a ladder-climb interactable for the loft */
-  const climbAt = barnToWorld(lx, lz + 0.6);
+  const climbAt = barnToWorld(lx, lz + 0.5);
   addInteractable({
     id:'loft-ladder',
     at: new THREE.Vector3(climbAt.x, 0, climbAt.z),
-    range: 1.4,
+    range: 0.95,
     anyAngle: true,
     label: () => character.position.y < BARN_FLOOR_Y + 1.2 ? 'Climb up to the loft' : null,
     use: () => {
       const at = barnToWorld(lx, lz + 0.45);
-      import('../player/controller').then(m =>
-        m.startClimb(at.x, at.z, FLOOR_TOP, BARN_FLOOR_Y + LOFT_Y + 0.30, BARN_ROT + Math.PI));
+      startClimb(at.x, at.z, FLOOR_TOP, BARN_FLOOR_Y + LOFT_Y + 0.30, BARN_ROT + Math.PI);
     },
   });
 }
@@ -238,20 +238,20 @@ refreshBarrels();
    ============================================================ */
 {
   const lx = W/2 - 0.42;
-  const board = part(BOX(0.10, 1.5, 3.4), OAK, lx, 1.9, 1.1, inside);
+  const board = part(BOX(0.10, 1.5, 3.0), OAK, lx, 1.9, 1.35, inside);
   board.receiveShadow = true;
-  for(const lz of [-0.3, 0.5, 1.3, 2.1, 2.6]){
+  for(const lz of [0.4, 1.0, 1.4, 2.0, 2.4]){
     part(CYL(0.035,0.035,0.26,6), OAK_DARK, lx - 0.16, 2.25, lz, inside).rotation.z = Math.PI/2;
   }
-  part(BOX(0.06, 0.16, 3.4), OAK_DARK, lx - 0.06, 1.18, 1.1, inside);
+  part(BOX(0.06, 0.16, 3.0), OAK_DARK, lx - 0.06, 1.18, 1.35, inside);
 
   /* where each tool sits when it is hung up, in world space */
   const spots: Record<ToolId, { lx:number; lz:number; y:number; rot:[number,number,number] }> = {
-    picker:  { lx: lx - 0.30, lz: 2.55, y: 0.60, rot:[0.16, 0, 0.05] },
-    shears:  { lx: lx - 0.24, lz: 1.30, y: 2.10, rot:[0, 0, 0] },
-    lantern: { lx: lx - 0.24, lz: 0.50, y: 2.05, rot:[0, 0, 0] },
-    ladder:  { lx: lx - 0.55, lz: -1.6, y: 0.16, rot:[0.10, 0, 0.06] },
-    barrow:  { lx: -1.4,      lz: 3.5,  y: 0.16, rot:[0, Math.PI*0.9, 0] },
+    picker:  { lx: lx - 0.30, lz: 2.40, y: 0.60, rot:[0.16, 0, 0.05] },
+    shears:  { lx: lx - 0.24, lz: 1.40, y: 2.10, rot:[0, 0, 0] },
+    lantern: { lx: lx - 0.24, lz: 0.40, y: 2.05, rot:[0, 0, 0] },
+    ladder:  { lx: lx - 0.55, lz: 3.60, y: 0.16, rot:[0.10, 0, 0.06] },
+    barrow:  { lx: -1.5,      lz: 3.60, y: 0.16, rot:[0, Math.PI*0.9, 0] },
   };
 
   scene.updateMatrixWorld(true);

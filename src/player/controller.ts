@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { state } from '../core/save';
 import { on, emit } from '../core/bus';
 import { move as moveAxis, held, pressed } from '../core/input';
+import { takeTouchJump } from '../ui/touch';
 import { camForward, camRight } from '../core/cameraRig';
 import type { Apple } from '../world/trees';
 import { surfaceAt, resolve } from '../world/collision';
@@ -119,7 +120,7 @@ export function updateController(dt: number, time: number){
   resolve(character.position, BODY_RADIUS);
 
   /* ---- up and down ---- */
-  if(pressed('jump') && player.grounded && !busy){
+  if((pressed('jump') || takeTouchJump()) && player.grounded && !busy){
     player.vy = JUMP_V;
     player.grounded = false;
     squash = -0.7;                                   // a stretch off the ground
