@@ -1,24 +1,39 @@
 /* ============================================================
-   The bear's legs — walking to a tapped point, and the gait
+   The bear's legs — walk, run, jump, and the gait that sells it.
+   Two ways in: the keys (camera-relative) or a tapped point.
    ============================================================ */
 import * as THREE from 'three';
-import { FX1, FX2, FZ1, FZ2 } from '../core/config';
 import { state } from '../core/save';
 import { on, emit } from '../core/bus';
-import { trees } from '../world/trees';
+import { move as moveAxis, held, pressed } from '../core/input';
+import { camForward, camRight } from '../core/cameraRig';
 import type { Apple } from '../world/trees';
-import { groundHeightAt } from '../world/ground';
+import { surfaceAt, resolve } from '../world/collision';
 import { barnDoorPoint } from '../world/barn';
 import { character, rig, bearRoot } from './rig';
-import { startPick, bounce } from './picking';
+import { startPick, bounce, picking } from './picking';
 
 export const WALK_SPEED = 3.1;
+export const RUN_SPEED  = 5.0;
+const ACCEL = 16, BRAKE = 20;
+const GRAVITY = 15, JUMP_V = 5.6;
+const BODY_RADIUS = 0.34;
 const ARRIVE_EPS = 0.14;
+
+export type Mode = 'ground' | 'air';
+
+export const player = {
+  vel: new THREE.Vector3(),   // horizontal only
+  vy: 0,
+  grounded: true,
+  mode: 'ground' as Mode,
+  speed: 0,
+};
 
 let moveTarget: THREE.Vector3 | null = null;
 let queuedApple: Apple | null = null;
 let queuedBarn = false;
-let walkT = 0, hop = 0, hopV = 0;
+let walkT = 0, squash = 0, hop = 0, hopV = 0;
 
 export function walkTo(p: THREE.Vector3){
   moveTarget = p.clone();
@@ -32,70 +47,118 @@ export function walkToBarn(){
   moveTarget = barnDoorPoint.clone();
   queuedApple = null; queuedBarn = true;
 }
+export function stopWalking(){ moveTarget = null; queuedApple = null; queuedBarn = false; }
 
 on('walk:to', ({ point }) => walkTo(point));
 on('walk:barn', () => walkToBarn());
 
-/** keep the bear from strolling through trunks, or out of the field */
-function avoidTrunks(p: THREE.Vector3){
-  for(const t of trees){
-    const dx = p.x - t.position.x, dz = p.z - t.position.z;
-    const d = Math.hypot(dx, dz);
-    if(d < 0.85 && d > 1e-4){
-      p.x = t.position.x + dx/d*0.85;
-      p.z = t.position.z + dz/d*0.85;
-    }
-  }
-  p.x = Math.max(FX1+1.2, Math.min(FX2-1.2, p.x));
-  p.z = Math.max(FZ1+1.2, Math.min(FZ2-1.2, p.z));
-}
-
-const _tmp = new THREE.Vector3();
+const _want = new THREE.Vector3(), _tmp = new THREE.Vector3();
 
 export function updateController(dt: number, time: number){
-  let walking = false;
+  const busy = picking();
 
-  if(moveTarget){
+  /* ---- what the bear is being asked to do ---- */
+  _want.set(0,0,0);
+  if(!busy && moveAxis.lengthSq() > 0.0004){
+    stopWalking();
+    _want.copy(camForward).multiplyScalar(moveAxis.y)
+         .addScaledVector(camRight, moveAxis.x);
+    if(_want.lengthSq() > 1) _want.normalize();
+    _want.multiplyScalar(held('run') ? RUN_SPEED : WALK_SPEED);
+  } else if(moveTarget && !busy){
     _tmp.subVectors(moveTarget, character.position); _tmp.y = 0;
     const dist = _tmp.length();
     if(dist > ARRIVE_EPS){
-      walking = true;
-      _tmp.normalize();
-      character.position.addScaledVector(_tmp, WALK_SPEED*dt);
-      avoidTrunks(character.position);
-      character.position.y = groundHeightAt(character.position.x, character.position.z);
-      const ang = Math.atan2(_tmp.x, _tmp.z);
-      let d = ang - character.rotation.y;
-      while(d > Math.PI) d -= Math.PI*2;
-      while(d < -Math.PI) d += Math.PI*2;
-      character.rotation.y += d * Math.min(1, dt*9);
-      walkT += dt*10;
+      _want.copy(_tmp).divideScalar(dist).multiplyScalar(Math.min(WALK_SPEED, dist*4));
     } else {
-      character.position.x = moveTarget.x; character.position.z = moveTarget.z;
-      character.position.y = groundHeightAt(moveTarget.x, moveTarget.z);
+      character.position.x = moveTarget.x;
+      character.position.z = moveTarget.z;
       moveTarget = null;
+      player.vel.set(0,0,0);
       if(queuedApple && !queuedApple.picked){ startPick(queuedApple); queuedApple = null; }
       if(queuedBarn){ queuedBarn = false; emit('arrive:barn'); }
     }
   }
 
-  /* --- gait --- */
-  if(walking){
+  /* ---- accelerate toward it ---- */
+  const rate = _want.lengthSq() > 0 ? ACCEL : BRAKE;
+  player.vel.x += (_want.x - player.vel.x) * Math.min(1, rate*dt);
+  player.vel.z += (_want.z - player.vel.z) * Math.min(1, rate*dt);
+  if(player.vel.lengthSq() < 0.0004) player.vel.set(0,0,0);
+  player.speed = player.vel.length();
+
+  character.position.x += player.vel.x*dt;
+  character.position.z += player.vel.z*dt;
+  resolve(character.position, BODY_RADIUS);
+
+  /* ---- up and down ---- */
+  if(pressed('jump') && player.grounded && !busy){
+    player.vy = JUMP_V;
+    player.grounded = false;
+    squash = -0.7;                                   // a stretch off the ground
+  }
+  player.vy -= GRAVITY*dt;
+  character.position.y += player.vy*dt;
+
+  const floor = surfaceAt(character.position.x, character.position.z, character.position.y);
+  if(character.position.y <= floor){
+    if(!player.grounded && player.vy < -3.5) squash = Math.min(1, -player.vy/9);
+    character.position.y = floor;
+    player.vy = 0;
+    player.grounded = true;
+  } else if(character.position.y > floor + 0.06){
+    player.grounded = false;
+  }
+  player.mode = player.grounded ? 'ground' : 'air';
+
+  /* ---- which way it is looking ---- */
+  if(!busy && player.speed > 0.15){
+    const ang = Math.atan2(player.vel.x, player.vel.z);
+    let d = ang - character.rotation.y;
+    while(d > Math.PI) d -= Math.PI*2;
+    while(d < -Math.PI) d += Math.PI*2;
+    character.rotation.y += d * Math.min(1, dt*11);
+  }
+
+  animate(dt, time);
+}
+
+/* ============================================================
+   Pose
+   ============================================================ */
+function animate(dt: number, time: number){
+  const gaitAmt = Math.min(1.25, player.speed / WALK_SPEED);
+
+  if(!player.grounded){
+    /* tucked in the air, arms lifted */
+    const rise = Math.max(-1, Math.min(1, player.vy/4));
+    ease(rig.legL, 'x', -0.55 - rise*0.25, dt*12);
+    ease(rig.legR, 'x', -0.30 + rise*0.20, dt*12);
+    rig.armR.rotation.x += (-1.5 - rise*0.5 - rig.armR.rotation.x)*Math.min(1, dt*10);
+    rig.armL.rotation.x += (-1.1 - rig.armL.rotation.x)*Math.min(1, dt*10);
+    rig.torso.rotation.z *= 0.9;
+    rig.head.rotation.x += (-0.10*rise - rig.head.rotation.x)*Math.min(1, dt*8);
+    rig.hat.rotation.z += (0.12 - rig.hat.rotation.z)*Math.min(1, dt*6);
+    rig.basket.rotation.z += (0.30 - rig.basket.rotation.z)*Math.min(1, dt*6);
+  }
+  else if(gaitAmt > 0.05){
+    walkT += dt*10*Math.max(0.55, gaitAmt);
     const s = Math.sin(walkT), c = Math.cos(walkT*2);
-    rig.legL.rotation.x =  s*0.75;
-    rig.legR.rotation.x = -s*0.75;
-    rig.armR.rotation.x = -s*0.6;
-    rig.armL.rotation.x = -0.30 + s*0.08;
-    rig.torso.position.y = 0.52 + Math.abs(c)*0.022;
-    rig.torso.rotation.z = s*0.035;
-    rig.head.rotation.z = -s*0.05;
+    rig.legL.rotation.x =  s*0.75*gaitAmt;
+    rig.legR.rotation.x = -s*0.75*gaitAmt;
+    rig.armR.rotation.x = -s*0.6*gaitAmt;
+    rig.armL.rotation.x = -0.30 + s*0.08*gaitAmt;
+    rig.torso.position.y = 0.52 + Math.abs(c)*0.022*gaitAmt;
+    rig.torso.rotation.z = s*0.035*gaitAmt;
+    rig.head.rotation.z = -s*0.05*gaitAmt;
     rig.head.rotation.x = 0.04;
-    rig.hat.rotation.z = -s*0.07;
-    rig.basket.rotation.z = 0.16 + s*0.07;
-  } else {
+    rig.hat.rotation.z = -s*0.07*gaitAmt;
+    rig.basket.rotation.z = 0.16 + s*0.07*gaitAmt;
+  }
+  else {
     const b = Math.sin(time*1.7)*0.5+0.5;
-    rig.legL.rotation.x += (0 - rig.legL.rotation.x)*Math.min(1,dt*8);
-    rig.legR.rotation.x += (0 - rig.legR.rotation.x)*Math.min(1,dt*8);
+    ease(rig.legL, 'x', 0, dt*8);
+    ease(rig.legR, 'x', 0, dt*8);
     rig.armL.rotation.x += (-0.30 - rig.armL.rotation.x)*Math.min(1,dt*8);
     rig.torso.position.y = 0.52 + b*0.012;
     rig.torso.rotation.z *= 0.9;
@@ -105,11 +168,19 @@ export function updateController(dt: number, time: number){
     rig.basket.rotation.z += (0.16 - rig.basket.rotation.z)*Math.min(1,dt*6);
   }
 
-  /* the little bounce the reach animation asks for */
+  /* the bounce the reach animation asks for, and the landing squash */
   if(bounce.v){ hopV = bounce.v; bounce.v = 0; }
   hopV -= 9.5*dt; hop = Math.max(0, hop + hopV*dt);
   if(hop <= 0) hopV = Math.max(hopV, 0);
   bearRoot.position.y = hop*0.14;
 
+  squash += (0 - squash)*Math.min(1, dt*9);
+  const sy = 1 - squash*0.30, sxz = 1 + squash*0.18;
+  bearRoot.scale.set(sxz, sy, sxz);
+
   void state;
+}
+
+function ease(o: THREE.Object3D, axis: 'x'|'y'|'z', to: number, k: number){
+  o.rotation[axis] += (to - o.rotation[axis]) * Math.min(1, k);
 }

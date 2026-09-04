@@ -9,6 +9,7 @@ import { addOutline, orient, fadeGroup } from '../core/materials';
 import type { Fadeable } from '../core/materials';
 import { state } from '../core/save';
 import { groundHeightAt, rowZ } from './ground';
+import { addSolid } from './collision';
 import {
   BRANCH_GEO, TRUNK_GEO, CANOPY_GEOS, BARK_MAT, BARK_DARK, CANOPY_BASE,
   buildApple, APPLE_SCALE, toonSoft,
@@ -226,6 +227,9 @@ for(let r=0;r<ROWS;r++){
     buildTree(x, z, 0.95 + Math.random()*0.25, planted++);
   }
 }
+
+/* trunks are the one thing in the rows you cannot walk through */
+for(const t of trees) addSolid({ kind:'circle', x:t.position.x, z:t.position.z, r:0.5 });
 
 /* stand points: where the bear plants its feet to reach each apple */
 scene.updateMatrixWorld(true);

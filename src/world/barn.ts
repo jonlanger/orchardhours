@@ -7,6 +7,8 @@ import { scene } from '../core/renderer';
 import { toonMat, addOutline, part, BOX, CYL, SPH } from '../core/materials';
 import { groundHeightAt } from './ground';
 import { APPLE_GEO } from './geometry';
+import { addSolid } from './collision';
+import { addCameraBlocker } from '../core/cameraRig';
 
 export const BARN_POS = new THREE.Vector3(BARN_X, 0, BARN_Z);
 export const barn = new THREE.Group();
@@ -143,3 +145,34 @@ part(APPLE_GEO, toonMat(0xC63B2E, true), 0, 1.45, 0.08, sign).scale.setScalar(0.
 export const barnFacing = new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0), barn.rotation.y);
 export const barnDoorPoint = BARN_POS.clone().addScaledVector(barnFacing, D/2 + 2.8);
 barnDoorPoint.y = groundHeightAt(barnDoorPoint.x, barnDoorPoint.z);
+
+/* ============================================================
+   What the barn blocks, and what it lets you climb on
+   ============================================================ */
+const _c = Math.cos(BARN_ROT), _s = Math.sin(BARN_ROT);
+/** barn-local coordinates out into the world */
+export function barnToWorld(lx: number, lz: number){
+  return { x: barn.position.x + lx*_c + lz*_s, z: barn.position.z - lx*_s + lz*_c };
+}
+export const BARN_FLOOR_Y = barn.position.y;
+
+/* the shell. Phase four opens a doorway in it. */
+addSolid({ kind:'box', x:barn.position.x, z:barn.position.z, hw:W/2, hd:D/2, ry:BARN_ROT });
+
+/* the silo */
+{
+  const p = barnToWorld(-W/2-2.2, -2.2);
+  addSolid({ kind:'circle', x:p.x, z:p.z, r:1.75 });
+}
+/* hay bales — low enough to hop onto */
+for(const [hx,hz] of [[-3.2, D/2+1.8], [-4.0, D/2+2.9]] as const){
+  const p = barnToWorld(hx, hz);
+  addSolid({ kind:'circle', x:p.x, z:p.z, r:0.66, top:BARN_FLOOR_Y + 1.24 });
+}
+/* yard crates — a first step up */
+for(const [cx,cz,cr] of [[2.9, D/2+1.5, 0.3],[3.7, D/2+2.4,-0.5],[2.4, D/2+2.7, 0.9]] as const){
+  const p = barnToWorld(cx, cz);
+  addSolid({ kind:'box', x:p.x, z:p.z, hw:0.50, hd:0.37, ry:BARN_ROT+cr, top:BARN_FLOOR_Y + 0.62 });
+}
+
+addCameraBlocker(barn);

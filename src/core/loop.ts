@@ -5,9 +5,15 @@ import * as THREE from 'three';
 
 export type System = (dt: number, time: number) => void;
 
+const preSystems: System[] = [];
 const fixedSystems: System[] = [];
 const frameSystems: System[] = [];
+const postSystems: System[] = [];
 
+/** runs first, before anything reads input this frame */
+export function addPre(fn: System){ preSystems.push(fn); }
+/** runs last, after every consumer has seen this frame's input */
+export function addPost(fn: System){ postSystems.push(fn); }
 /** runs on a fixed 1/60 step: movement, physics, anything that must not vary */
 export function addFixed(fn: System){ fixedSystems.push(fn); }
 /** runs once per rendered frame: cameras, fades, cosmetics */
@@ -31,9 +37,11 @@ export function step(seconds: number, render?: () => void){
   while(left > 1e-6){
     const dt = Math.min(STEP, left);
     time += dt;
+    for(const fn of preSystems) fn(dt, time);
     for(const fn of fixedSystems) fn(dt, time);
     for(const fn of frameSystems) fn(dt, time);
     render?.();
+    for(const fn of postSystems) fn(dt, time);
     left -= dt;
   }
 }
@@ -43,6 +51,8 @@ export function start(render: () => void){
     requestAnimationFrame(frame);
     const dt = Math.min(clock.getDelta(), 0.05);
     time += dt;
+
+    for(const fn of preSystems) fn(dt, time);
 
     acc += dt;
     let steps = 0;
@@ -55,6 +65,7 @@ export function start(render: () => void){
 
     for(const fn of frameSystems) fn(dt, time);
     render();
+    for(const fn of postSystems) fn(dt, time);
   }
   frame();
 }

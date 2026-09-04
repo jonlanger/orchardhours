@@ -7,7 +7,7 @@ import * as THREE from 'three';
 
 import { renderer, scene, camera } from './core/renderer';
 import { load, save, state } from './core/save';
-import { addFixed, addFrame, start, step } from './core/loop';
+import { addPre, addPost, addFixed, addFrame, start, step } from './core/loop';
 import * as input from './core/input';
 import { applySettings } from './core/settings';
 
@@ -17,10 +17,10 @@ import { updateProps } from './world/props';
 import './world/barn';
 
 import { character, rig } from './player/rig';
-import { updateController } from './player/controller';
+import { updateController, player, walkTo } from './player/controller';
 import { updatePicking, updateBasketFruit } from './player/picking';
 import { initInteraction } from './player/interaction';
-import { updateCamera, focus } from './core/cameraRig';
+import { updateCamera, focus, cam, recenterBehind } from './core/cameraRig';
 
 import { renderBasket, setHint, hideHint, hintIsShown, $ } from './ui/hud';
 import { initOverlays, openBarn, openMenu, closeOverlays, overlayOpen } from './ui/overlays';
@@ -48,14 +48,15 @@ addFixed((dt) => {
 });
 
 addFrame((dt, time) => {
-  input.beginFrame();
   updateDay(dt, character.position);
   updateCamera(dt);
   updateTrees(dt, time, camera.position, focus);
   updateProps(dt, time);
   followCamera();
-  input.endFrame();
 });
+
+addPre(() => input.beginFrame());
+addPost(() => input.endFrame());
 
 start(() => renderer.render(scene, camera));
 
@@ -70,6 +71,7 @@ declare global {
 }
 window.OH = {
   THREE, scene, camera, renderer, state, character, rig, $,
+  cam, player, walkTo, recenterBehind,
   /** advance the world by hand — used by automated checks */
   step: (s = 1) => step(s, () => renderer.render(scene, camera)),
 };
