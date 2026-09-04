@@ -11,6 +11,7 @@ import { SPAWN } from '../player/rig';
 import { updateBasketFruit } from '../player/picking';
 import { applySettings } from '../core/settings';
 import { $, renderBasket, toast } from './hud';
+import { openMap } from './minimap';
 
 export const overlayOpen = () => document.querySelector('.overlay.on') !== null;
 
@@ -133,6 +134,7 @@ export function initOverlays(){
   $('btnMenu').onclick = openMenu;
   $('menuClose').onclick = closeOverlays;
   $('btnBarn').onclick = ()=> openBarn('almanac');
+  $('btnMap').onclick = openMap;
   $('barnClose').onclick = closeOverlays;
 
   document.querySelectorAll('.overlay').forEach(o =>
@@ -147,6 +149,7 @@ export function initOverlays(){
     if(act === 'barn')     emit('walk:barn');
     if(act === 'settings') openBarn('settings');
     if(act === 'about')    openBarn('about');
+    if(act === 'map')      openMap();
     if(act === 'recenter') emit('walk:to', { point: SPAWN.clone() });
   });
 }

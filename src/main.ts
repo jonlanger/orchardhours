@@ -27,6 +27,7 @@ import { updateCamera, focus, cam, recenterBehind } from './core/cameraRig';
 
 import { renderBasket, setHint, hideHint, hintIsShown, toast, $ } from './ui/hud';
 import { initOverlays, openBarn, openMenu, closeOverlays, overlayOpen, deposit } from './ui/overlays';
+import { updateMinimap, openMap, closeMap, mapOpen } from './ui/minimap';
 
 /* ---- boot ---- */
 applySettings();
@@ -52,6 +53,7 @@ addFixed((dt) => {
 addFrame((dt) => {
   tools.updateTools(dt);
   interact.updateInteract();
+  updateMinimap(dt);
 });
 
 onNewDay(day => {
@@ -86,7 +88,7 @@ declare global {
 }
 window.OH = {
   THREE, scene, camera, renderer, state, character, rig, $,
-  cam, player, walkTo, walkToApple, startClimb, recenterBehind,
+  cam, player, walkTo, walkToApple, startClimb, recenterBehind, openMap, closeMap, mapOpen,
   apples, trees, barn, tools, interact, canReach, refreshBarrels, deposit,
   /** advance the world by hand — used by automated checks */
   step: (s = 1) => step(s, () => renderer.render(scene, camera)),
