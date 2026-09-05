@@ -3,105 +3,150 @@
    A quiet season in the apple rows.
    ============================================================ */
 import './style.css';
-import * as THREE from 'three';
+import * as boot from './ui/boot';
 
-import { renderer, scene, camera } from './core/renderer';
-import { save, state } from './core/save';
-import { addPre, addPost, addFixed, addFrame, start, step } from './core/loop';
-import * as input from './core/input';
-import { applySettings } from './core/settings';
+/* The world is built at import time, module by module, so the modules
+   are pulled in one stage at a time: each stage gets its own stretch of
+   the tree on the boot curtain before it blocks the thread. The weights
+   are rough shares of the work — the rows cost the most by far. */
+const W = { ground:1.0, sky:0.6, rows:2.2, barn:1.8, grass:1.2, saplings:0.4, bear:0.9, gate:0.7 };
+boot.plan(Object.values(W).reduce((a, b) => a + b, 0));
 
-import { updateDay, followCamera, onNewDay } from './world/sky';
-import { updateTrees, regrowOvernight, apples, trees } from './world/trees';
-import { updateProps } from './world/props';
-import * as barn from './world/barn';
-import { updateBarnInterior, refreshBarrels } from './world/barnInterior';
+async function main(){
+  boot.begin();
 
-import { character, rig } from './player/rig';
-import { updateController, player, walkTo, walkToApple, startClimb } from './player/controller';
-import { updatePicking, updateBasketFruit, canReach } from './player/picking';
-import { initInteraction } from './player/interaction';
-import * as interact from './player/interact';
-import * as tools from './player/tools';
-import { updateCamera, focus, cam, recenterBehind } from './core/cameraRig';
+  const [renderer, save, loop, input, settings] = await boot.stage('Clearing the ground', W.ground, () =>
+    Promise.all([
+      import('./core/renderer'), import('./core/save'), import('./core/loop'),
+      import('./core/input'), import('./core/settings'),
+    ]));
 
-import { renderBasket, setHint, hideHint, hintIsShown, toast, $ } from './ui/hud';
-import { initOverlays, openBarn, openMenu, closeOverlays, overlayOpen, deposit } from './ui/overlays';
-import { updateMinimap, openMap, closeMap, mapOpen } from './ui/minimap';
-import { initTouch } from './ui/touch';
+  const sky = await boot.stage('Raising the sky', W.sky, () => import('./world/sky'));
+  const trees = await boot.stage('Planting the rows', W.rows, () => import('./world/trees'));
 
-/* ---- boot ---- */
-applySettings();
-renderBasket();
-updateBasketFruit();
-initOverlays();
-initInteraction();
-initTouch();
+  const [barn, barnInterior, desk, machines, economy] = await boot.stage('Building the barn', W.barn, () =>
+    Promise.all([import('./world/barn'), import('./world/barnInterior'),
+                 import('./world/desk'), import('./world/machines'),
+                 import('./core/economy')]));
 
-input.setBlocker(overlayOpen);
+  const props = await boot.stage('Letting the grass in', W.grass, () => import('./world/props'));
+  const saplings = await boot.stage('Setting the young trees', W.saplings, () => import('./world/saplings'));
 
-/* keys that belong to the shell rather than to the bear */
-addEventListener('keydown', e => {
-  if(e.key === 'Escape'){ overlayOpen() ? closeOverlays() : openMenu(); }
-  if(e.key.toLowerCase() === 'b' && !overlayOpen()) openBarn('almanac');
-});
+  const [rig, controller, picking, interaction, interact, tools, antics, vigour, cameraRig] =
+    await boot.stage('Waking the bear', W.bear, () => Promise.all([
+      import('./player/rig'), import('./player/controller'), import('./player/picking'),
+      import('./player/interaction'), import('./player/interact'), import('./player/tools'),
+      import('./player/antics'), import('./player/vigour'),
+      import('./core/cameraRig'),
+    ]));
 
-/* ---- systems ---- */
-addFixed((dt) => {
-  updateController(dt, performance.now()/1000);
-  updatePicking(dt);
-});
+  const [THREE, hud, overlays, minimap, touch, land] = await boot.stage('Opening the gate', W.gate, () =>
+    Promise.all([
+      import('three'), import('./ui/hud'), import('./ui/overlays'),
+      import('./ui/minimap'), import('./ui/touch'), import('./world/land'),
+    ]));
 
-addFrame((dt) => {
-  tools.updateTools(dt);
-  interact.updateInteract();
-  updateMinimap(dt);
-});
+  const { scene, camera } = renderer;
 
-onNewDay(day => {
-  const back = regrowOvernight();
-  toast(back
-    ? `Day ${day}. The trees have set ${back} more apples overnight.`
-    : `Day ${day} in the orchard.`);
-});
+  /* ---- boot ---- */
+  settings.applySettings();
+  hud.renderBasket();
+  hud.renderPurse();
+  picking.updateBasketFruit();
+  overlays.initOverlays();
+  interaction.initInteraction();
+  touch.initTouch();
 
-addFrame((dt, time) => {
-  updateDay(dt, character.position);
-  updateCamera(dt);
-  updateTrees(dt, time, camera.position, focus);
-  updateProps(dt, time);
-  updateBarnInterior(dt, camera.position);
-  followCamera();
-});
+  input.setBlocker(overlays.overlayOpen);
 
-addPre(() => input.beginFrame());
-addPost(() => input.endFrame());
+  /* keys that belong to the shell rather than to the bear */
+  addEventListener('keydown', e => {
+    if(e.key === 'Escape'){ overlays.overlayOpen() ? overlays.closeOverlays() : overlays.openMenu(); }
+    if(e.key.toLowerCase() === 'b' && !overlays.overlayOpen()) overlays.openBarn('almanac');
+  });
 
-start(() => renderer.render(scene, camera));
+  /* ---- systems ---- */
+  loop.addFixed((dt) => {
+    controller.updateController(dt, performance.now()/1000);
+    picking.updatePicking(dt);
+  });
 
-/* ---- the opening line, then quiet ---- */
-setTimeout(()=>{
-  if(hintIsShown()) setHint(input.isTouch
-    ? 'Stick to walk · drag to look · tap an apple to pick it'
-    : 'WASD to walk · drag to look · tap an apple to pick it');
-}, 100);
-setTimeout(hideHint, 9000);
-/* a nudge toward the barn, for anyone who has not found the rack yet */
-setTimeout(()=>{
-  if(state.carried.length || overlayOpen()) return;
-  setHint('The pole, the ladder and the barrow are on the rack inside the barn');
-  setTimeout(hideHint, 8000);
-}, 26000);
+  loop.addFrame((dt, time) => {
+    tools.updateTools(dt);
+    antics.updateAntics(dt);
+    machines.updateMachines(dt, time);
+    interact.updateInteract();
+    minimap.updateMinimap(dt);
+    vigour.updateVigourMeter();
+  });
 
-addEventListener('beforeunload', save);
+  sky.onNewDay(day => {
+    vigour.rested();
+    economy.overnight(day);
+    machines.refreshMachines();
+    saplings.overnight();
+    const back = trees.regrowOvernight();
+    hud.toast(back
+      ? `Day ${day}. The trees have set ${back} more apples overnight.`
+      : `Day ${day} in the orchard.`);
+  });
+
+  loop.addFrame((dt, time) => {
+    sky.updateDay(dt, rig.character.position);
+    cameraRig.updateCamera(dt);
+    trees.updateTrees(dt, time, camera.position, cameraRig.focus);
+    props.updateProps(dt, time);
+    barnInterior.updateBarnInterior(dt, camera.position);
+    sky.followCamera();
+  });
+
+  loop.addPre(() => input.beginFrame());
+  loop.addPost(() => input.endFrame());
+
+  const render = () => renderer.renderer.render(scene, camera);
+  render();                       /* one frame behind the curtain, so the
+                                     shaders are compiled before it lifts */
+  loop.start(render);
+
+  boot.finish();                  /* the orchard runs while the curtain fades */
+
+  /* ---- the opening line, then quiet ---- */
+  setTimeout(()=>{
+    if(hud.hintIsShown()) hud.setHint(input.isTouch
+      ? 'Stick to walk · drag to look · tap an apple to pick it'
+      : 'WASD to walk · drag to look · tap an apple to pick it · F to eat, C to sit, R to throw');
+  }, 100);
+  setTimeout(hud.hideHint, 9000);
+  /* a nudge toward the barn, for anyone who has not found the rack yet */
+  setTimeout(()=>{
+    if(save.state.carried.length || overlays.overlayOpen()) return;
+    hud.setHint('The pole, the ladder and the barrow are on the rack inside the barn');
+    setTimeout(hud.hideHint, 8000);
+  }, 26000);
+
+  addEventListener('beforeunload', save.save);
+
+  window.OH = {
+    THREE, scene, camera, renderer: renderer.renderer, state: save.state,
+    character: rig.character, rig: rig.rig, $: hud.$,
+    cam: cameraRig.cam, player: controller.player, walkTo: controller.walkTo,
+    walkToApple: controller.walkToApple, startClimb: controller.startClimb,
+    recenterBehind: cameraRig.recenterBehind,
+    openMap: minimap.openMap, closeMap: minimap.closeMap, mapOpen: minimap.mapOpen,
+    apples: trees.apples, trees: trees.trees, barn, tools, interact, antics, vigour,
+    economy, desk, machines, saplings, land,
+    canReach: picking.canReach, refreshBarrels: barnInterior.refreshBarrels,
+    deposit: overlays.deposit,
+    /** advance the world by hand — used by automated checks */
+    step: (s = 1) => loop.step(s, render),
+  };
+}
 
 declare global {
   interface Window { OH: Record<string, unknown> }
 }
-window.OH = {
-  THREE, scene, camera, renderer, state, character, rig, $,
-  cam, player, walkTo, walkToApple, startClimb, recenterBehind, openMap, closeMap, mapOpen,
-  apples, trees, barn, tools, interact, canReach, refreshBarrels, deposit,
-  /** advance the world by hand — used by automated checks */
-  step: (s = 1) => step(s, () => renderer.render(scene, camera)),
-};
+
+main().catch(err => {
+  console.error(err);
+  boot.fail('The orchard would not open. Reload to try again.');
+});

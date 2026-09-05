@@ -14,7 +14,7 @@ import { trees, treeData } from '../world/trees';
 import { groundHeightAt } from '../world/ground';
 import { rig, character } from './rig';
 import { addInteractable } from './interact';
-import { startClimb, climbing } from './controller';
+import { startClimb, climbing, player } from './controller';
 import { toast } from '../ui/hud';
 import { initBelt, renderBelt } from '../ui/belt';
 
@@ -32,7 +32,7 @@ export interface ToolDef {
   label: string;
   slot: number;                 // the number key that reaches for it
   note: string;
-  socket: 'handR' | 'shoulder' | 'front';
+  socket: 'handR' | 'shoulder' | 'front' | 'pole';
   pos: [number, number, number];
   rot: [number, number, number];
   build: () => THREE.Group;
@@ -40,23 +40,98 @@ export interface ToolDef {
 }
 
 /* ---- the meshes ---- */
+
+/* the pole telescopes: the shaft is a unit cylinder scaled from its butt, and
+   the head — collar, hoop, tines, bag — rides at the top of it */
+export const POLE_REST_LEN = 2.5;
+export const POLE_MAX_LEN  = 7.0;   // it telescopes; the top of these trees is a long way up
+/* the cant is outward, away from the bear: a positive roll leans the top
+   across the body and puts the shaft through its head */
+export const POLE_REST_PITCH = -0.16, POLE_REST_ROLL = -0.22;
+
+interface PickerParts {
+  stalk: THREE.Group; head: THREE.Group;
+  hoopPoint: THREE.Object3D; bagPoint: THREE.Object3D;
+}
+
 function buildPicker(){
   const g = new THREE.Group();
-  const shaft = part(CYL(0.026, 0.030, 2.9, 8), POLE, 0, 0.85, 0, g);
+  part(CYL(0.036, 0.036, 0.20, 8), WOOD_DARK, 0, 0.09, 0, g);        // the grip, at the butt
+
+  const stalk = new THREE.Group();
+  const shaftGeo = CYL(0.026, 0.030, 1, 8);
+  shaftGeo.translate(0, 0.5, 0);                                      // grows +Y from the butt
+  const shaft = new THREE.Mesh(shaftGeo, POLE);
+  shaft.castShadow = true;
+  stalk.add(shaft);
   addOutline(shaft, 1.10, 0x4a3626);
-  part(CYL(0.034, 0.034, 0.10, 8), IRON, 0, 2.24, 0, g);
-  /* the wire hoop and its little cloth bag */
-  const hoop = part(new THREE.TorusGeometry(0.15, 0.014, 6, 16), IRON, 0, 2.42, 0.02, g);
+  g.add(stalk);
+
+  const head = new THREE.Group();
+  part(CYL(0.034, 0.034, 0.10, 8), IRON, 0, 0, 0, head);
+  const hoop = part(new THREE.TorusGeometry(0.15, 0.014, 6, 16), IRON, 0, 0.18, 0.02, head);
   hoop.rotation.x = Math.PI/2;
   for(let i=0;i<5;i++){
     const a = (i/5)*Math.PI*2;
-    const tine = part(CYL(0.008, 0.008, 0.13, 5), IRON, Math.cos(a)*0.14, 2.47, Math.sin(a)*0.14 + 0.02, g);
+    const tine = part(CYL(0.008, 0.008, 0.13, 5), IRON,
+      Math.cos(a)*0.14, 0.23, Math.sin(a)*0.14 + 0.02, head);
     tine.rotation.set(Math.cos(a)*0.35, 0, -Math.sin(a)*0.35);
   }
-  const bag = part(new THREE.CylinderGeometry(0.145, 0.09, 0.20, 12, 1, true), CANVAS_M, 0, 2.31, 0.02, g);
+  const bag = part(new THREE.CylinderGeometry(0.145, 0.09, 0.20, 12, 1, true), CANVAS_M, 0, 0.07, 0.02, head);
   (bag.material as THREE.MeshToonMaterial).side = THREE.DoubleSide;
-  part(CYL(0.036, 0.036, 0.16, 8), WOOD_DARK, 0, -0.42, 0, g);   // grip
+  g.add(head);
+
+  const hoopPoint = new THREE.Object3D(); hoopPoint.position.set(0, 0.19, 0.02); head.add(hoopPoint);
+  const bagPoint  = new THREE.Object3D(); bagPoint.position.set(0, 0.05, 0.02); head.add(bagPoint);
+
+  g.userData = { stalk, head, hoopPoint, bagPoint } satisfies PickerParts;
   return g;
+}
+
+/* ---- aiming the pole ----
+   The pole hangs off the chest rather than off the swinging right arm; a three
+   metre lever on a shoulder joint reads as a flailing stick. Picking drives
+   these directly and updateTools eases them home again. */
+export const pole = { pitch: POLE_REST_PITCH, roll: POLE_REST_ROLL, twist: 0, len: POLE_REST_LEN,
+  /** true while a reach is driving the pole, so it is not eased home under it */
+  aiming: false };
+
+function applyPole(){
+  const g = mesh.picker;
+  if(!g) return;
+  const parts = g.userData as PickerParts;
+  rig.pole.rotation.order = 'ZXY';                 // twist in the hands, then pitch, then cant
+  rig.pole.rotation.set(pole.pitch, pole.twist, pole.roll);
+  parts.stalk.scale.y = pole.len;
+  parts.head.position.y = pole.len;
+}
+
+/** point the pole so its hoop lands on a target that far up and out */
+export function aimPole(pitch: number, len: number, twist = 0, roll = 0){
+  pole.pitch = pitch;
+  pole.len = Math.min(POLE_MAX_LEN, Math.max(1.6, len));
+  pole.twist = twist;
+  pole.roll = roll;
+  applyPole();
+}
+
+/** where the hoop and the bag currently are, in world space */
+export function poleHoop(out: THREE.Vector3){
+  return (mesh.picker.userData as PickerParts).hoopPoint.getWorldPosition(out);
+}
+export function poleBag(out: THREE.Vector3){
+  return (mesh.picker.userData as PickerParts).bagPoint.getWorldPosition(out);
+}
+/** where the pole pivots, so a reach can work out its angle and its length */
+export function poleGrip(out: THREE.Vector3){ return rig.pole.getWorldPosition(out); }
+
+function easePole(dt: number){
+  const k = Math.min(1, dt*7);
+  pole.pitch += (POLE_REST_PITCH - pole.pitch)*k;
+  pole.roll  += (POLE_REST_ROLL  - pole.roll )*k;
+  pole.twist += (0 - pole.twist)*k;
+  pole.len   += (POLE_REST_LEN - pole.len)*k;
+  applyPole();
 }
 
 const LADDER_H = 3.4;
@@ -84,10 +159,18 @@ function buildBarrow(){
     part(CYL(0.03,0.03,0.16,6), WOOD_DARK, sx*0.26, 0.44, -1.16, g).rotation.x = Math.PI/2;
     part(BOX(0.05, 0.34, 0.05), WOOD_DARK, sx*0.24, 0.16, -0.46, g);
   }
-  const wheel = part(CYL(0.20, 0.20, 0.09, 14), IRON, 0, 0.21, 0.62, g);
+  /* the wheel hangs in its own pivot so it can roll while it is pushed */
+  const hub = new THREE.Group();
+  hub.position.set(0, 0.21, 0.62);
+  g.add(hub);
+  const wheel = part(CYL(0.20, 0.20, 0.09, 14), IRON, 0, 0, 0, hub);
   wheel.rotation.z = Math.PI/2;
   addOutline(wheel, 1.06, 0x33231a);
-  part(BOX(0.06, 0.40, 0.06), WOOD_DARK, 0, 0.34, 0.62, g);
+  for(const sp of [0, 1]){                                    // two spokes, so the turn reads
+    part(BOX(0.030, 0.34, 0.030), WOOD_DARK, 0, 0, 0, hub).rotation.z = sp ? Math.PI/2 : 0;
+  }
+  part(BOX(0.06, 0.40, 0.06), WOOD_DARK, 0, 0.34, 0.62, g);   // the leg the tray rests on
+  g.userData = { hub };
   return g;
 }
 
@@ -123,7 +206,7 @@ function buildLantern(){
 
 export const TOOLS: Record<ToolId, ToolDef> = {
   picker: {
-    id:'picker', label:'picking pole', slot:1, socket:'handR', pos:[0,-0.05,0.04], rot:[-0.85,0.12,0.16],
+    id:'picker', label:'picking pole', slot:1, socket:'pole', pos:[0,0,0], rot:[0,0,0],
     note:'A telescoping pole with a wire hoop and a cloth bag. Everything above head height comes down with this.',
     build: buildPicker,
     icon:`<svg viewBox="0 0 24 24" fill="none"><path d="M12 21V8" stroke="#8E6636" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="6" r="3.4" stroke="#59606B" stroke-width="1.6"/><path d="M9.2 7.6l1 3h3.6l1-3" stroke="#B9A57C" stroke-width="1.3" stroke-linejoin="round"/></svg>`,
@@ -135,7 +218,7 @@ export const TOOLS: Record<ToolId, ToolDef> = {
     icon:`<svg viewBox="0 0 24 24" fill="none"><path d="M8 3v18M16 3v18" stroke="#B98A50" stroke-width="1.8" stroke-linecap="round"/><path d="M8 7h8M8 12h8M8 17h8" stroke="#8E6636" stroke-width="1.5" stroke-linecap="round"/></svg>`,
   },
   barrow: {
-    id:'barrow', label:'wheelbarrow', slot:3, socket:'front', pos:[0,-0.30,0.10], rot:[0,Math.PI,0],
+    id:'barrow', label:'wheelbarrow', slot:3, socket:'front', pos:[0,-0.30,0.62], rot:[0,0,0],
     note:'Sixty apples of overflow, so a good tree does not send you back to the barn halfway through.',
     build: buildBarrow,
     icon:`<svg viewBox="0 0 24 24" fill="none"><path d="M4 8h10l3 6H7L4 8z" stroke="#B98A50" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 14l4 3" stroke="#8E6636" stroke-width="1.6" stroke-linecap="round"/><circle cx="9" cy="18" r="2.2" stroke="#59606B" stroke-width="1.6"/></svg>`,
@@ -235,10 +318,11 @@ function place(){
       continue;
     }
 
-    if(carrying(id) && (state.equipped === id || def.socket !== 'handR')){
-      /* in hand, over the shoulder, or out in front */
-      const socket = def.socket === 'handR' ? rig.handR : def.socket === 'shoulder' ? rig.shoulder : rig.front;
-      if(state.equipped !== id && def.socket === 'front'){ /* the barrow is only ever pushed */ }
+    if(carrying(id) && (state.equipped === id || def.socket === 'shoulder' || def.socket === 'front')){
+      /* in hand, across the chest, over the shoulder, or out in front */
+      const socket = def.socket === 'handR' ? rig.handR
+        : def.socket === 'pole' ? rig.pole
+        : def.socket === 'shoulder' ? rig.shoulder : rig.front;
       socket.add(g);
       g.position.set(...def.pos);
       g.rotation.set(...def.rot);
@@ -344,8 +428,8 @@ function parkBarrow(){
   if(n >= 0) state.carried.splice(n, 1);
   const p = character.position;
   state.barrow = {
-    x: p.x + Math.sin(character.rotation.y)*1.1,
-    z: p.z + Math.cos(character.rotation.y)*1.1,
+    x: p.x + Math.sin(character.rotation.y)*1.5,
+    z: p.z + Math.cos(character.rotation.y)*1.5,
     ry: character.rotation.y,
     load: state.barrow?.load ?? { honeycrisp:0, grannysmith:0, golden:0, rare:0 },
   };
@@ -426,12 +510,21 @@ export function updateTools(dt: number){
     GLASS.emissiveIntensity = lantern.lit ? 1.6 : 0.05;
   }
 
-  /* the barrow rides level over the swells while it is being pushed */
+  /* the pole rides across the chest until a reach takes it over */
+  if(!pole.aiming) easePole(dt);
+
+  /* the barrow rides level over the swells while it is being pushed,
+     and its wheel turns with the ground it covers */
   if(carrying('barrow')){
     const g = mesh.barrow;
     if(g.parent === rig.front){
       const ground = groundHeightAt(character.position.x, character.position.z);
       g.position.y = TOOLS.barrow.pos[1] + (ground - character.position.y);
+    }
+    const hub = (g.userData as { hub?: THREE.Group }).hub;
+    if(hub){
+      const fwd = player.vel.x*Math.sin(character.rotation.y) + player.vel.z*Math.cos(character.rotation.y);
+      hub.rotation.x += fwd*dt/0.20;               // rolling, not sliding
     }
   }
 }

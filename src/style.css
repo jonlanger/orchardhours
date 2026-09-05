@@ -55,6 +55,27 @@
   .count.bump{ animation:bump .45s ease; }
   @keyframes bump{ 0%{transform:scale(1)} 35%{transform:scale(1.5); color:var(--accent-deep)} 100%{transform:scale(1)} }
 
+  /* ---- what is left in the legs ---- */
+  .vigour{ position:absolute; top:62px; left:14px; display:flex; align-items:center; gap:9px;
+    padding:6px 12px 5px; border-radius:14px; pointer-events:none; }
+  .vigour svg{ width:15px; height:15px; display:block; flex:none; }
+  .vig-lbl{ font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-soft); }
+  .vig-bar{ width:92px; height:6px; border-radius:4px; background:rgba(120,88,50,.20);
+    overflow:hidden; box-shadow:inset 0 1px 2px rgba(70,45,22,.18); }
+  .vig-bar i{ display:block; height:100%; width:100%; border-radius:4px;
+    background:linear-gradient(90deg,#8FBF4F,#D9A441);
+    transition:width .4s cubic-bezier(.2,.8,.2,1), background .6s ease; }
+  .vigour.low .vig-bar i{ background:linear-gradient(90deg,#D9A441,#C4553C); }
+  .vigour.out .vig-bar i{ background:var(--accent-deep); }
+  .vigour.out{ animation:vigPulse 2.1s ease-in-out infinite; }
+  @keyframes vigPulse{ 0%,100%{ opacity:1 } 50%{ opacity:.6 } }
+
+  /* ---- what is in the purse ---- */
+  .purse{ position:absolute; top:100px; left:14px; display:flex; align-items:center; gap:8px;
+    padding:5px 12px 4px; border-radius:14px; pointer-events:none; }
+  .purse svg{ width:15px; height:15px; display:block; flex:none; }
+  .purse b{ font-weight:400; font-size:14px; font-variant-numeric:tabular-nums; color:var(--ink); }
+
   .hint{ position:absolute; bottom:86px; left:50%; transform:translateX(-50%);
     font-size:clamp(12px,2vw,14.5px); color:#4a3220; padding:7px 16px; border-radius:20px;
     transition:opacity .6s ease; text-align:center; white-space:nowrap; }
@@ -124,11 +145,38 @@
   .stat span{ font-size:11.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft); }
   .toggle{ display:flex; align-items:center; gap:10px; font-size:14px; padding:11px 4px; border-bottom:1px dashed var(--line); }
   .toggle:last-child{ border-bottom:none; }
-  .sw{ margin-left:auto; width:44px; height:25px; border-radius:14px; border:1px solid var(--line);
+  /* the knob is centred on the pill, and travels the same margin at each end */
+  .sw{ margin-left:auto; flex:none; box-sizing:border-box;
+    width:46px; height:26px; border-radius:13px; border:1px solid var(--line);
     background:rgba(120,88,50,.18); position:relative; cursor:pointer; transition:background .25s; }
-  .sw i{ position:absolute; top:2px; left:2px; width:19px; height:19px; border-radius:50%; background:#FFFAEF;
-    box-shadow:0 1px 3px rgba(0,0,0,.25); transition:transform .25s cubic-bezier(.2,.8,.2,1); }
-  .sw.on{ background:var(--accent-deep); } .sw.on i{ transform:translateX(19px); }
+  .sw i{ position:absolute; top:50%; left:3px; margin-top:-9px; width:18px; height:18px;
+    border-radius:50%; background:#FFFAEF; box-shadow:0 1px 3px rgba(0,0,0,.28);
+    transition:transform .25s cubic-bezier(.2,.8,.2,1); }
+  .sw.on{ background:var(--accent-deep); } .sw.on i{ transform:translateX(20px); }
+  /* ---- where you are, and the way back ---- */
+  .crumbs{ display:flex; align-items:center; gap:7px; margin-bottom:4px;
+    font-size:11.5px; letter-spacing:.05em; color:var(--ink-soft); }
+  .crumbs:empty{ display:none; }
+  .crumb{ font:inherit; font-size:11.5px; letter-spacing:.05em; color:var(--accent-deep);
+    background:none; border:none; padding:0; cursor:pointer; }
+  .crumb:hover{ text-decoration:underline; }
+  .crumbs .sep{ opacity:.45; }
+
+  /* ---- the key legend under the pause menu ---- */
+  .keys{ display:flex; flex-wrap:wrap; gap:7px 14px; padding:2px 22px 22px;
+    font-size:12px; color:var(--ink-soft); }
+  .keys span{ display:flex; align-items:center; gap:6px; }
+  .keys .wide{ width:100%; margin-top:4px; opacity:.8; }
+  .keys b{ font-weight:400; font-size:11px; letter-spacing:.05em; color:var(--ink);
+    background:rgba(120,88,50,.13); border:1px solid var(--line); border-radius:6px; padding:2px 7px; }
+
+  /* ---- the catalogue page ---- */
+  .cat-head{ margin:22px 0 8px; font-size:15px; font-weight:400; letter-spacing:.03em;
+    color:var(--ink); border-bottom:1px solid var(--line); padding-bottom:6px; }
+  .cat-head:first-of-type{ margin-top:18px; }
+  .btn.sm{ font-size:12.5px; padding:6px 11px; border-radius:10px; }
+  .sh{ font-style:normal; font-size:.78em; letter-spacing:.04em; margin-left:2px; opacity:.7; }
+
   .lede{ font-size:13.5px; line-height:1.6; color:var(--ink-soft); margin:0 0 14px; }
 
   /* ---- narrow screens: compact HUD, clock moves out of the way ---- */
@@ -151,6 +199,11 @@
     .basket-row > span:nth-child(2){ display:none; }
     .count{ margin:0; font-size:12px; }
     .hint{ white-space:normal; max-width:70vw; bottom:70px; }
+    .vigour{ top:52px; left:10px; padding:5px 10px 4px; gap:7px; }
+    .purse{ top:86px; left:10px; padding:4px 10px 3px; gap:6px; }
+    .purse .vig-lbl{ display:none; }
+    .vig-bar{ width:70px; }
+    .vig-lbl{ display:none; }
     .sheet-head{ padding:14px 16px 12px; gap:10px; }
     .sheet-head h2{ font-size:19px; }
     .tabs{ padding:10px 12px 0; overflow-x:auto; -webkit-overflow-scrolling:touch; }
@@ -159,6 +212,7 @@
     .menu-list{ padding:14px 16px 18px; }
     .menu-item{ font-size:15px; padding:12px 14px; }
     .menu-item small{ display:none; }
+    .keys{ padding:0 16px 16px; gap:6px 10px; font-size:11.5px; }
   }
 
   /* ---- ledger fill bars ---- */
@@ -220,16 +274,21 @@
     border:1px solid var(--line); box-shadow:0 3px 8px rgba(70,45,22,.25); }
   .touch-btns{ position:absolute; right:18px; bottom:96px; display:none; gap:12px;
     align-items:flex-end; pointer-events:auto; }
+  /* eat, sit and throw sit in a column beside the two big buttons */
+  .tsmall{ display:flex; flex-direction:column; gap:9px; }
   .tbtn{ font:inherit; font-size:17px; color:var(--ink); width:60px; height:60px; border-radius:50%;
     background:linear-gradient(180deg,#FFFAEF,#F0E1C4); border:1px solid var(--line);
     box-shadow:0 3px 0 rgba(120,88,50,0.20), var(--shadow); touch-action:none; }
   .tbtn.big{ width:74px; height:74px; font-size:20px; }
+  .tbtn.sm{ width:46px; height:46px; }
+  .tbtn svg{ width:22px; height:22px; display:block; margin:0 auto; }
   .tbtn:active{ transform:translateY(2px); box-shadow:0 1px 0 rgba(120,88,50,0.18); }
   body.touch .stick, body.touch .touch-btns{ display:flex; }
   /* on a phone the thumbs own the bottom corners, so everything else moves up */
   body.touch .stick{ left:16px; bottom:22px; }
   body.touch .touch-btns{ right:16px; bottom:26px; }
-  body.touch .belt{ left:50%; transform:translateX(-50%); bottom:124px; }
-  body.touch .minimap{ right:8px; bottom:190px; width:92px; }
-  body.touch .hint, body.touch .prompt{ bottom:190px; max-width:58vw; }
+  /* the thumb cluster is three rows tall now, so everything else moves up */
+  body.touch .belt{ left:50%; transform:translateX(-50%); bottom:200px; }
+  body.touch .minimap{ right:8px; bottom:262px; width:92px; }
+  body.touch .hint, body.touch .prompt{ bottom:262px; max-width:58vw; }
   body.touch .title{ top:64px; bottom:auto; }

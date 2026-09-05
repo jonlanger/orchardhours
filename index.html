@@ -6,8 +6,66 @@
 <meta name="description" content="Orchard Hours — a quiet season in the apple rows."/>
 <meta name="theme-color" content="#EDE3CE"/>
 <title>Orchard Hours</title>
+<style>
+  /* ---- the boot curtain: a tree drawn line by line while the world is built.
+         Inlined so it paints before the bundle has even downloaded. ---- */
+  #boot{ position:fixed; inset:0; z-index:20; display:flex; align-items:center; justify-content:center;
+    background:#EDE3CE; color:#6b533f;
+    font-family: Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
+    transition:opacity .65s ease; }
+  #boot.gone{ opacity:0; pointer-events:none; }
+  .boot-inner{ display:flex; flex-direction:column; align-items:center; gap:2px;
+    transform:translateY(-2vh); }
+  .boot-tree{ width:min(54vw, 208px); height:auto; overflow:visible; }
+  .boot-tree .ink{ fill:none; stroke:#7A5A3C; stroke-width:2.6; stroke-linecap:round; stroke-linejoin:round; }
+  .boot-tree .soil{ stroke-width:2; opacity:.45; }
+  .boot-tree .fruit{ fill:#C4553C; opacity:0; transform:scale(.2); transform-origin:center;
+    transform-box:fill-box; }
+  #boot.fruiting .fruit{ animation:bootFruit .5s cubic-bezier(.2,1.5,.4,1) forwards; }
+  #boot.fruiting .fruit:nth-child(2){ animation-delay:.09s; }
+  #boot.fruiting .fruit:nth-child(3){ animation-delay:.18s; }
+  @keyframes bootFruit{ from{ opacity:0; transform:scale(.2) } to{ opacity:1; transform:scale(1) } }
+  .boot-word{ margin-top:14px; font-size:clamp(16px,2.4vw,21px); letter-spacing:.08em; color:#4a3220; }
+  .boot-label{ margin-top:7px; font-size:11.5px; letter-spacing:.18em; text-transform:uppercase;
+    opacity:.72; min-height:1em; text-align:center; }
+  /* an animation rather than a transition: the fade still runs while a
+     building stage has the main thread pinned */
+  .boot-label.in{ animation:bootLabel .34s ease both; }
+  @keyframes bootLabel{ from{ opacity:0; transform:translateY(2px) } to{ opacity:.72; transform:none } }
+  #boot.failed .boot-label{ color:#9E3F2B; opacity:1; text-transform:none; letter-spacing:.02em; font-size:13px; }
+  @media (prefers-reduced-motion: reduce){
+    #boot.fruiting .fruit{ animation:none; opacity:1; transform:none; }
+    .boot-label.in{ animation:none; }
+  }
+</style>
 </head>
 <body>
+<div id="boot">
+  <div class="boot-inner">
+    <svg class="boot-tree" viewBox="0 0 200 208" aria-label="Loading" role="img">
+      <g>
+        <path class="ink soil draw" d="M40 190 H160"/>
+        <path class="ink draw" d="M100 190 C99 174 96 160 97 146"/>
+        <path class="ink draw" d="M97 152 C90 140 78 134 68 124"/>
+        <path class="ink draw" d="M81 136 C76 130 70 128 64 119"/>
+        <path class="ink draw" d="M98 152 C106 140 116 134 126 126"/>
+        <path class="ink draw" d="M116 134 C120 127 126 124 132 117"/>
+        <path class="ink draw" d="M97 148 C97 134 99 124 100 112"/>
+        <path class="ink draw" d="M99 124 C103 118 108 114 113 110"/>
+        <path class="ink draw" d="M100 42 C126 38 146 54 144 76 C162 86 158 114 138 122
+          C126 136 104 138 96 126 C76 134 54 122 58 102 C42 90 48 62 70 58 C76 44 88 38 100 42 Z"/>
+      </g>
+      <g class="boot-fruit">
+        <circle class="fruit" cx="75" cy="109" r="5"/>
+        <circle class="fruit" cx="122" cy="93" r="5"/>
+        <circle class="fruit" cx="98" cy="78" r="5"/>
+      </g>
+    </svg>
+    <div class="boot-word">Orchard Hours</div>
+    <div class="boot-label in" id="bootLabel" aria-live="polite">Clearing the ground</div>
+  </div>
+</div>
+
 <div id="ui">
   <div class="topleft">
     <button class="btn" id="btnMenu"><span class="gl">☰</span><span class="lbl">Menu</span></button>
@@ -16,6 +74,22 @@
   </div>
   <div class="title"><h1>Orchard Hours</h1><div class="sub" id="clock">Morning · Day 1</div></div>
   <div class="basket panel" id="basketPanel"></div>
+  <div class="vigour panel" id="vigourPanel">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 7.5c-3.4 0-5.4 2.3-5.4 5.7 0 3.8 2.7 8.5 5.4 8.5s5.4-4.7 5.4-8.5c0-3.4-2-5.7-5.4-5.7z" fill="#C4553C"/>
+      <path d="M12 7.5c0-2 1.1-3.4 3-3.8.1 1.7-1 3.4-3 3.8z" fill="#6FA24A"/>
+    </svg>
+    <div class="vig-bar"><i id="vigourBar"></i></div>
+    <span class="vig-lbl">Vigour</span>
+  </div>
+  <div class="purse panel" id="pursePanel">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="8" fill="#D9A441" stroke="#9E7420" stroke-width="1.2"/>
+      <path d="M12 7.6v8.8M9.6 9.8h4.2a1.7 1.7 0 0 1 0 3.4h-3.6a1.7 1.7 0 0 0 0 3.4h4.2"
+        stroke="#7A5A18" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+    </svg>
+    <b id="purse">0</b><span class="vig-lbl">shillings</span>
+  </div>
   <div class="hint panel" id="hint">Drag to look around · tap an apple to pick it</div>
   <div class="toast panel" id="toast"></div>
   <div class="prompt panel" id="prompt"></div>
@@ -34,13 +108,13 @@
       <button class="btn x" id="menuClose">Close</button>
     </div>
     <div class="menu-list">
-      <button class="menu-item" data-act="resume"><span>↩</span> Return to the orchard</button>
       <button class="menu-item" data-act="barn"><span>⌂</span> Walk to the barn <small id="menuBarnHint"></small></button>
       <button class="menu-item" data-act="map"><span>◱</span> The orchard plan <small>where the fruit is left</small></button>
       <button class="menu-item" data-act="recenter"><span>◎</span> Recall the bear <small>bring Pom back to the gate</small></button>
+      <button class="menu-item" data-act="help"><span>❦</span> How to play <small>picking, tools, controls</small></button>
       <button class="menu-item" data-act="settings"><span>⚙</span> Settings <small>quality &amp; comfort</small></button>
-      <button class="menu-item" data-act="about"><span>❦</span> About this orchard</button>
     </div>
+    <div class="keys" id="menuKeys"></div>
   </div>
 </div>
 
@@ -52,12 +126,15 @@
         <path d="M20 11c0-3 1.6-5 4.4-5.6C24.6 8 23 10.6 20 11z" fill="#6FA24A"/>
         <rect x="19.3" y="6.5" width="1.5" height="5" rx="0.7" fill="#6B4A33"/>
       </svg>
-      <div><h2 id="barnTitle">The Barn</h2><p id="barnSub">The season's paper record</p></div>
+      <div><div class="crumbs" id="barnCrumbs"></div>
+        <h2 id="barnTitle">The Barn</h2><p id="barnSub">The season's paper record</p></div>
       <button class="btn x" id="barnClose">Back outside</button>
     </div>
     <div class="tabs" id="barnTabs">
       <button class="tab on" data-tab="almanac">Almanac</button>
       <button class="tab" data-tab="ledger">Ledger</button>
+      <button class="tab" data-tab="catalogue">Catalogue</button>
+      <button class="tab" data-tab="about">How to play</button>
       <button class="tab" data-tab="settings">Settings</button>
     </div>
     <div class="sheet-body" id="barnBody"></div>

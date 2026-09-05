@@ -9,6 +9,7 @@ import { renderer } from './renderer';
 export type Action =
   | 'jump' | 'run' | 'interact' | 'stow'
   | 'map' | 'menu' | 'barn'
+  | 'eat' | 'sit' | 'throw'
   | 'tool1' | 'tool2' | 'tool3' | 'tool4' | 'tool5';
 
 const BINDINGS: Record<Action, string[]> = {
@@ -19,6 +20,9 @@ const BINDINGS: Record<Action, string[]> = {
   map:      ['KeyM'],
   menu:     ['Escape'],
   barn:     ['KeyB'],
+  eat:      ['KeyF'],
+  sit:      ['KeyC'],
+  throw:    ['KeyR'],
   tool1:    ['Digit1'], tool2: ['Digit2'], tool3: ['Digit3'],
   tool4:    ['Digit4'], tool5: ['Digit5'],
 };

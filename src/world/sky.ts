@@ -15,7 +15,7 @@ const skyUniforms = {
 };
 
 const sky = new THREE.Mesh(
-  new THREE.SphereGeometry(150, 32, 20),
+  new THREE.SphereGeometry(280, 32, 20),
   new THREE.ShaderMaterial({
     side:THREE.BackSide, depthWrite:false, fog:false, uniforms:skyUniforms,
     vertexShader:`varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,

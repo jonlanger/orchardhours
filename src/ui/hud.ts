@@ -30,6 +30,13 @@ export function renderBasket(bumpKey?: string){
     </div><div class="rows">${rows}</div>`;
 }
 
+/* ---- the purse ---- */
+export function renderPurse(){
+  const el = document.getElementById('purse');
+  if(!el) return;
+  el.textContent = String(state.purse);
+}
+
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 export function toast(msg: string){
   const t = $('toast');

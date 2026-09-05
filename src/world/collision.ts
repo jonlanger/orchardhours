@@ -2,7 +2,7 @@
    What the bear cannot walk through, and what it can stand on
    ============================================================ */
 import * as THREE from 'three';
-import { FX1, FX2, FZ1, FZ2 } from '../core/config';
+import { bounds } from '../core/config';
 import { groundHeightAt } from './ground';
 
 export interface Solid {
@@ -99,8 +99,9 @@ export function resolve(p: THREE.Vector3, radius: number){
       }
     }
   }
-  p.x = Math.max(FX1+1.2, Math.min(FX2-1.2, p.x));
-  p.z = Math.max(FZ1+1.2, Math.min(FZ2-1.2, p.z));
+  /* the fence, wherever it stands today */
+  p.x = Math.max(bounds.x1+1.2, Math.min(bounds.x2-1.2, p.x));
+  p.z = Math.max(bounds.z1+1.2, Math.min(bounds.z2-1.2, p.z));
 }
 
 /** is this point inside a solid at all? used to place things without burying them */

@@ -26,7 +26,8 @@ export interface Rig {
   torso: THREE.Group; body: THREE.Mesh;
   armL: THREE.Group; armR: THREE.Group;
   handL: THREE.Group; handR: THREE.Group;
-  shoulder: THREE.Group; front: THREE.Group;
+  shoulder: THREE.Group; front: THREE.Group; pole: THREE.Group;
+  mouth: THREE.Group;
   head: THREE.Group; hat: THREE.Group;
   basket: THREE.Group; basketFruit: THREE.Mesh[];
 }
@@ -70,6 +71,11 @@ rig.handL = new THREE.Group(); rig.handL.position.set(0, -0.225, 0.02); rig.armL
 rig.handR = new THREE.Group(); rig.handR.position.set(0, -0.225, 0.02); rig.armR.add(rig.handR);
 rig.shoulder = new THREE.Group(); rig.shoulder.position.set(0.10, 0.20, -0.05); rig.torso.add(rig.shoulder);
 rig.front = new THREE.Group(); rig.front.position.set(0, 0.32, 0.85); character.add(rig.front);
+/* The picking pole is carried on the body rather than swung on the arm — a
+   three-metre pole on a swinging shoulder joint flails. The butt sits low and
+   outboard of the right hip so the shaft rises past the shoulder and clears
+   the head; the paw closes on it at hip height, the way you carry a rake. */
+rig.pole = new THREE.Group(); rig.pole.position.set(0.30, -0.26, 0.06); rig.torso.add(rig.pole);
 
 /* head */
 rig.head = new THREE.Group(); rig.head.position.y = 0.90; character.add(rig.head);
@@ -85,6 +91,9 @@ for(const sx of [-1,1]){
   ear.scale.set(0.072,0.070,0.030); addOutline(ear, 1.08);
   part(SPH, CREAM, sx*0.150, 0.125, 0.010, rig.head).scale.set(0.042,0.040,0.020);
 }
+
+/* where a held apple meets the snout */
+rig.mouth = new THREE.Group(); rig.mouth.position.set(0, -0.045, 0.20); rig.head.add(rig.mouth);
 
 /* straw hat */
 rig.hat = new THREE.Group(); rig.hat.position.y = 0.145; rig.head.add(rig.hat);

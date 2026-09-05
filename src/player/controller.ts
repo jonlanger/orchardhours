@@ -12,7 +12,9 @@ import type { Apple } from '../world/trees';
 import { surfaceAt, resolve } from '../world/collision';
 import { barnDoorPoint } from '../world/barn';
 import { character, rig, bearRoot } from './rig';
-import { startPick, bounce, picking } from './picking';
+import { startPick, bounce, picking, stretch, canReach } from './picking';
+import { antics, standUp } from './antics';
+import { updateVigour, pace, spent, tired } from './vigour';
 
 export const WALK_SPEED = 3.1;
 export const RUN_SPEED  = 5.0;
@@ -62,6 +64,11 @@ export function walkTo(p: THREE.Vector3){
   queuedApple = null; queuedBarn = false;
 }
 export function walkToApple(a: Apple){
+  /* up a ladder there is no walking to be done — reach from where you are */
+  if(climb){
+    if(canReach(a)) startPick(a);
+    return;
+  }
   moveTarget = a.standPoint.clone();
   queuedApple = a; queuedBarn = false;
 }
@@ -77,7 +84,8 @@ on('walk:barn', () => walkToBarn());
 const _want = new THREE.Vector3(), _tmp = new THREE.Vector3();
 
 export function updateController(dt: number, time: number){
-  const busy = picking();
+  const busy = picking() || antics.busy;
+  const running = held('run') && !spent();
 
   if(climb){
     updateClimb(dt);
@@ -87,17 +95,18 @@ export function updateController(dt: number, time: number){
 
   /* ---- what the bear is being asked to do ---- */
   _want.set(0,0,0);
-  if(!busy && moveAxis.lengthSq() > 0.0004){
+  if(moveAxis.lengthSq() > 0.0004 || (moveTarget && antics.sitting)) standUp();
+  if(!busy && !antics.sitting && moveAxis.lengthSq() > 0.0004){
     stopWalking();
     _want.copy(camForward).multiplyScalar(moveAxis.y)
          .addScaledVector(camRight, moveAxis.x);
     if(_want.lengthSq() > 1) _want.normalize();
-    _want.multiplyScalar(held('run') ? RUN_SPEED : WALK_SPEED);
-  } else if(moveTarget && !busy){
+    _want.multiplyScalar((running ? RUN_SPEED : WALK_SPEED) * pace());
+  } else if(moveTarget && !busy && !antics.sitting){
     _tmp.subVectors(moveTarget, character.position); _tmp.y = 0;
     const dist = _tmp.length();
     if(dist > ARRIVE_EPS){
-      _want.copy(_tmp).divideScalar(dist).multiplyScalar(Math.min(WALK_SPEED, dist*4));
+      _want.copy(_tmp).divideScalar(dist).multiplyScalar(Math.min(WALK_SPEED*pace(), dist*4));
     } else {
       character.position.x = moveTarget.x;
       character.position.z = moveTarget.z;
@@ -120,7 +129,8 @@ export function updateController(dt: number, time: number){
   resolve(character.position, BODY_RADIUS);
 
   /* ---- up and down ---- */
-  if((pressed('jump') || takeTouchJump()) && player.grounded && !busy){
+  if((pressed('jump') || takeTouchJump()) && antics.sitting){ standUp(); }
+  else if((pressed('jump') || takeTouchJump()) && player.grounded && !busy){
     player.vy = JUMP_V;
     player.grounded = false;
     squash = -0.7;                                   // a stretch off the ground
@@ -138,6 +148,7 @@ export function updateController(dt: number, time: number){
     player.grounded = false;
   }
   player.mode = player.grounded ? 'ground' : 'air';
+  updateVigour(dt, player.speed, player.mode, running);
 
   /* ---- which way it is looking ---- */
   if(!busy && player.speed > 0.15){
@@ -180,8 +191,12 @@ function updateClimb(dt: number){
 /* ============================================================
    Pose
    ============================================================ */
+const lerp = (a: number, b: number, p: number) => a + (b-a)*p;
+
 function animate(dt: number, time: number){
   const gaitAmt = Math.min(1.25, player.speed / WALK_SPEED);
+  const pushing = state.carried.includes('barrow');
+  const droop = tired() ? 1 - Math.max(0, (state.vigour - 0)/0.36) : 0;
 
   if(climb){
     /* hand over hand, one rung at a time */
@@ -238,17 +253,57 @@ function animate(dt: number, time: number){
     rig.basket.rotation.z += (0.16 - rig.basket.rotation.z)*Math.min(1,dt*6);
   }
 
+  /* both paws on the handles while the barrow is out in front */
+  if(pushing && !climb && player.grounded){
+    const k = Math.min(1, dt*9);
+    ease(rig.armR, 'x', -1.02 + Math.sin(walkT)*0.05*gaitAmt, k);
+    ease(rig.armL, 'x', -1.02 - Math.sin(walkT)*0.05*gaitAmt, k);
+    ease(rig.armR, 'z', -0.16, k);
+    ease(rig.armL, 'z',  0.16, k);
+    rig.torso.rotation.x += (0.12 - rig.torso.rotation.x)*k;
+  }
+
+  /* the paw closes on the pole instead of swinging through it */
+  if(state.equipped === 'picker' && !picking() && !climb){
+    const k = Math.min(1, dt*8);
+    ease(rig.armR, 'x', -0.15 + Math.sin(walkT)*0.10*gaitAmt, k);
+    ease(rig.armR, 'z', 0.32, k);
+  }
+
+  /* a tired bear stoops, and its head goes down */
+  if(droop > 0.02 && !climb){
+    rig.head.rotation.x += (0.22*droop - rig.head.rotation.x)*Math.min(1, dt*4);
+    rig.torso.rotation.x += (0.10*droop - rig.torso.rotation.x)*Math.min(1, dt*3);
+  }
+
+  /* sitting down in the grass */
+  const sit = antics.sit;
+  if(sit > 0.002){
+    rig.legL.rotation.x = lerp(rig.legL.rotation.x, -1.34, sit);
+    rig.legR.rotation.x = lerp(rig.legR.rotation.x, -1.28, sit);
+    rig.legL.rotation.z = lerp(rig.legL.rotation.z, -0.14, sit);
+    rig.legR.rotation.z = lerp(rig.legR.rotation.z,  0.14, sit);
+    rig.torso.rotation.x = lerp(rig.torso.rotation.x, 0.16, sit);
+    rig.torso.rotation.z = lerp(rig.torso.rotation.z, 0, sit);
+    rig.torso.position.y = lerp(rig.torso.position.y, 0.50 + Math.sin(time*1.4)*0.008, sit);
+    rig.armR.rotation.x = lerp(rig.armR.rotation.x, -0.62, sit);
+    rig.armL.rotation.x = lerp(rig.armL.rotation.x, -0.58, sit);
+    rig.armR.rotation.z = lerp(rig.armR.rotation.z, -0.22, sit);
+    rig.armL.rotation.z = lerp(rig.armL.rotation.z, -0.10, sit);
+    rig.head.rotation.x = lerp(rig.head.rotation.x, -0.06, sit);
+    rig.hat.rotation.z = lerp(rig.hat.rotation.z, 0.10, sit);
+    rig.basket.rotation.z = lerp(rig.basket.rotation.z, 0.30, sit);
+  }
+
   /* the bounce the reach animation asks for, and the landing squash */
   if(bounce.v){ hopV = bounce.v; bounce.v = 0; }
   hopV -= 9.5*dt; hop = Math.max(0, hop + hopV*dt);
   if(hop <= 0) hopV = Math.max(hopV, 0);
-  bearRoot.position.y = hop*0.14;
+  bearRoot.position.y = hop*0.14 + stretch.y - 0.26*antics.sit;
 
   squash += (0 - squash)*Math.min(1, dt*9);
   const sy = 1 - squash*0.30, sxz = 1 + squash*0.18;
   bearRoot.scale.set(sxz, sy, sxz);
-
-  void state;
 }
 
 function ease(o: THREE.Object3D, axis: 'x'|'y'|'z', to: number, k: number){

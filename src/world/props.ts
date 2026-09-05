@@ -2,7 +2,7 @@
    Fence, meadow detail, hills, clouds, petals
    ============================================================ */
 import * as THREE from 'three';
-import { FX1, FX2, FZ1, FZ2, TYPE_KEYS, APPLE_TYPES, BARN_X, BARN_Z } from '../core/config';
+import { bounds, TYPE_KEYS, APPLE_TYPES, BARN_X, BARN_Z } from '../core/config';
 import { scene } from '../core/renderer';
 import { toonMat, BOX } from '../core/materials';
 import { state } from '../core/save';
@@ -37,8 +37,15 @@ function fenceRun(x1: number, z1: number, x2: number, z2: number){
     }
   }
 }
-fenceRun(FX1,FZ1,FX2,FZ1); fenceRun(FX1,FZ2,FX2,FZ2);
-fenceRun(FX1,FZ1,FX1,FZ2); fenceRun(FX2,FZ1,FX2,FZ2);
+/** the fence is redrawn whenever the farm grows; posts and rails are shared
+    geometry and shared materials, so clearing the group leaks nothing */
+export function rebuildFence(){
+  FENCE.clear();
+  const { x1, x2, z1, z2 } = bounds;
+  fenceRun(x1,z1,x2,z1); fenceRun(x1,z2,x2,z2);
+  fenceRun(x1,z1,x1,z2); fenceRun(x2,z1,x2,z2);
+}
+rebuildFence();
 
 /* ---- grass tufts ---- */
 const bladeGeo = (function(){
@@ -64,6 +71,25 @@ grass.receiveShadow = true;
 }
 scene.add(grass);
 
+/** tuft a strip of newly bought ground, so it does not read as bare plane */
+export function grassPatch(x1: number, x2: number, z1: number, z2: number){
+  const n = Math.max(60, Math.round(Math.abs((x2-x1)*(z2-z1))*0.22));
+  const patch = new THREE.InstancedMesh(bladeGeo, toonMat(0x9BC46A, true), n);
+  patch.receiveShadow = true;
+  patch.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n*3), 3);
+  const d = new THREE.Object3D(), col = new THREE.Color();
+  for(let i=0;i<n;i++){
+    const x = x1 + Math.random()*(x2-x1), z = z1 + Math.random()*(z2-z1);
+    d.position.set(x, groundHeightAt(x,z), z);
+    d.rotation.set((Math.random()-0.5)*0.3, Math.random()*6.28, (Math.random()-0.5)*0.3);
+    d.scale.setScalar(0.5 + Math.random()*0.7);
+    d.updateMatrix(); patch.setMatrixAt(i, d.matrix);
+    col.setHex(0x9BC46A).offsetHSL(0,(Math.random()-0.5)*0.08,(Math.random()-0.5)*0.10);
+    patch.setColorAt(i, col);
+  }
+  scene.add(patch);
+}
+
 /* ---- windfall apples and small stones in the lanes ---- */
 for(let i=0;i<26;i++){
   const x = (Math.random()-0.5)*48, z = (Math.random()-0.5)*52 + 4;
@@ -84,10 +110,10 @@ for(let i=0;i<26;i++){
 /* ---- distant hills, unlit-flat so they read as background ---- */
 for(let i=0;i<11;i++){
   const a = (i/11)*Math.PI*2 + 0.3;
-  const r = 78 + Math.random()*26;
+  const r = 96 + Math.random()*26;
   const h = new THREE.Mesh(CANOPY_GEOS[i%3]!, toonMat(i%2 ? 0x7E9E74 : 0x8FAA7E, true));
   h.position.set(Math.cos(a)*r, -3 - Math.random()*2, Math.sin(a)*r);
-  h.scale.set(20+Math.random()*14, 9+Math.random()*6, 17+Math.random()*12);
+  h.scale.set(26+Math.random()*16, 11+Math.random()*7, 22+Math.random()*14);
   scene.add(h);
 }
 

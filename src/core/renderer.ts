@@ -14,9 +14,9 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.prepend(renderer.domElement);
 
 export const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xBFDCE8, 52, 165);
+scene.fog = new THREE.Fog(0xBFDCE8, 52, 200);
 
-export const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 220);
+export const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 320);
 
 export function updateCameraFov(){
   const a = innerWidth/innerHeight;

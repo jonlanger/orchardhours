@@ -2,7 +2,7 @@
    Trees — trunk, recursive limbs, layered canopy, hung fruit
    ============================================================ */
 import * as THREE from 'three';
-import { ROWS, PER_ROW, TREE_SPACING, TYPE_WEIGHTS } from '../core/config';
+import { ROWS, PER_ROW, TREE_SPACING, TYPE_WEIGHTS, REACH_FROM_FEET } from '../core/config';
 import type { AppleType } from '../core/config';
 import { scene } from '../core/renderer';
 import { addOutline, orient, fadeGroup } from '../core/materials';
@@ -15,11 +15,30 @@ import {
   buildApple, APPLE_SCALE, toonSoft,
 } from './geometry';
 
+/* by hand: reach up, cup it, roll it, twist it free, carry it down.
+   on the pole: aim, hook and roll it off, into the bag, lower, tip out. */
+export type PickPhase =
+  | 'reach' | 'cup' | 'twist' | 'carry'
+  | 'aim' | 'hook' | 'bag' | 'lower' | 'tip';
+
 export interface PickAnim {
-  phase: 'reach' | 'fly';
+  phase: PickPhase;
   t: number;
-  face?: number;
-  from?: THREE.Vector3;
+  /** the way the bear turns to face the work */
+  face: number;
+  /** taken on the end of the pole rather than by hand */
+  pole: boolean;
+  /** the fruit's own orientation, in world terms, before anything touched it */
+  q0: THREE.Quaternion;
+  /** the axis it rolls about: across the line from the bear to the fruit */
+  axis: THREE.Vector3;
+  /** where it hung, and where the current leg of the journey began */
+  at: THREE.Vector3;
+  from: THREE.Vector3;
+  /** how far the pole had to run out to reach it */
+  len: number;
+  /** how high the bear goes up on its toes for this one */
+  lift: number;
 }
 
 export interface Apple {
@@ -48,8 +67,8 @@ export const trees: THREE.Group[] = [];
 
 export const treeData = (t: THREE.Group) => t.userData as TreeData;
 
-/** fruit a bear can reach standing on the ground */
-export const REACH_Y = 3.3;
+/** fruit a bear can reach standing on the ground, and so pick by hand */
+export const REACH_Y = REACH_FROM_FEET;
 
 function pickType(): AppleType {
   const r = Math.random(); let acc = 0;
@@ -83,7 +102,7 @@ function growLimb(
   }
 }
 
-function buildTree(x: number, z: number, scale: number, index: number){
+export function buildTree(x: number, z: number, scale: number, index: number){
   const g = new THREE.Group();
   g.position.set(x, groundHeightAt(x,z), z);
   g.rotation.y = Math.random()*Math.PI*2;
@@ -165,14 +184,28 @@ function buildTree(x: number, z: number, scale: number, index: number){
         tip.z + (Math.random()-0.5)*0.9*scale));
     }
   }
+  /* --- the middle of the tree: fruit on the scaffolds and under the skirt of
+         the canopy, which is where most of a real crop hangs --- */
+  {
+    const nMid = 6 + Math.floor(Math.random()*4);
+    const bottom = trunkH*0.92;
+    const top = core.position.y - core.scale.y*0.50;
+    for(let i=0;i<nMid;i++){
+      const a = (i/nMid)*Math.PI*2 + Math.random()*0.8;
+      const rr = (0.70 + Math.random()*1.20)*scale;
+      spots.push(new THREE.Vector3(
+        Math.cos(a)*rr, bottom + Math.random()*Math.max(0.6, top - bottom), Math.sin(a)*rr));
+    }
+  }
+
   /* --- and the crop up in the canopy, which only a pole will reach --- */
   {
-    const nHigh = 4 + Math.floor(Math.random()*3);
+    const nHigh = 7 + Math.floor(Math.random()*4);
     for(let i=0;i<nHigh;i++){
       const a = (i/nHigh)*Math.PI*2 + Math.random()*0.7;
       const rr = core.scale.x*(0.55 + Math.random()*0.42);
       const yy = core.position.y + (Math.random()-0.35)*core.scale.y*1.15;
-      spots.push(new THREE.Vector3(Math.cos(a)*rr, Math.max(REACH_Y + 0.45, yy), Math.sin(a)*rr));
+      spots.push(new THREE.Vector3(Math.cos(a)*rr, Math.max(core.position.y - core.scale.y*0.85, yy), Math.sin(a)*rr));
     }
   }
 
@@ -188,7 +221,7 @@ function buildTree(x: number, z: number, scale: number, index: number){
   const used: THREE.Vector3[] = [];
   for(const p of spots){
     if(p.y < 1.15) continue;
-    if(used.some(u => u.distanceTo(p) < 0.48*scale)) continue;
+    if(used.some(u => u.distanceTo(p) < 0.44*scale)) continue;
     used.push(p);
 
     const type = pickType();
@@ -229,24 +262,22 @@ function buildTree(x: number, z: number, scale: number, index: number){
   return g;
 }
 
-/* --- plant the rows --- */
-let planted = 0;
-for(let r=0;r<ROWS;r++){
-  for(let i=0;i<PER_ROW;i++){
-    const x = (i - (PER_ROW-1)/2) * TREE_SPACING + (Math.random()-0.5)*0.5;
-    const z = rowZ[r]! + (Math.random()-0.5)*0.5;
-    buildTree(x, z, 0.95 + Math.random()*0.25, planted++);
-  }
+/* --- what a tree needs doing to it once it exists --- */
+
+/** the one thing in the rows you cannot walk through */
+function registerTrunk(t: THREE.Group){
+  addSolid({ kind:'circle', x:t.position.x, z:t.position.z, r:0.5 });
 }
 
-/* trunks are the one thing in the rows you cannot walk through */
-for(const t of trees) addSolid({ kind:'circle', x:t.position.x, z:t.position.z, r:0.5 });
-
-/* stand points: where the bear plants its feet to reach each apple */
-scene.updateMatrixWorld(true);
-{
+/**
+ * Where the bear plants its feet to reach each apple. Baked rather than worked
+ * out per reach, and done from `from` so a tree planted later can bake its own
+ * without redoing the whole orchard.
+ */
+function bakeStandPoints(from = 0){
   const wp = new THREE.Vector3();
-  for(const a of apples){
+  for(let i = from; i < apples.length; i++){
+    const a = apples[i]!;
     a.group.getWorldPosition(wp);
     const tp = a.treeGroup.position;
     const flat = new THREE.Vector3(wp.x - tp.x, 0, wp.z - tp.z);
@@ -258,6 +289,33 @@ scene.updateMatrixWorld(true);
     a.worldPos.copy(wp);
   }
 }
+
+/**
+ * Plant one at runtime — a sapling coming into bearing comes through here.
+ * Trees are only ever appended, never reordered, which is what keeps the
+ * positional indices in `state.prunedTrees` pointing at the same trees.
+ */
+export function plantTree(x: number, z: number, scale = 1){
+  const from = apples.length;
+  const g = buildTree(x, z, scale, trees.length);
+  g.updateMatrixWorld(true);          // one tree's matrices, not the whole scene
+  bakeStandPoints(from);
+  registerTrunk(g);
+  return g;
+}
+
+/* --- plant the rows --- */
+let planted = 0;
+for(let r=0;r<ROWS;r++){
+  for(let i=0;i<PER_ROW;i++){
+    const x = (i - (PER_ROW-1)/2) * TREE_SPACING + (Math.random()-0.5)*0.5;
+    const z = rowZ[r]! + (Math.random()-0.5)*0.5;
+    buildTree(x, z, 0.95 + Math.random()*0.25, planted++);
+  }
+}
+for(const t of trees) registerTrunk(t);
+scene.updateMatrixWorld(true);
+bakeStandPoints(0);
 
 /* ---- per-frame: sway, and fading whatever stands between eye and bear ---- */
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _camDir = new THREE.Vector3();

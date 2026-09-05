@@ -11,6 +11,16 @@ export interface Events {
   'walk:barn': void;
   /* the controller reached a queued destination */
   'arrive:barn': void;
+  /* something wants the pause menu back on screen */
+  'menu:open': void;
+  /* a machine was delivered and should appear in the barn */
+  'machine:installed': { id: string };
+  /* a plot was bought; the fence and the plan follow the new bounds */
+  'land:bought': { id: string };
+  /* the barn sheet should redraw itself where it stands */
+  'barn:render': void;
+  /* the desk was used; open the catalogue */
+  'catalogue:open': void;
   /* the basket contents changed */
   'basket:changed': { bump?: string };
   /* a save-worthy change happened */

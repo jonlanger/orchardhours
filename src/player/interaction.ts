@@ -8,7 +8,7 @@ import { onTap } from '../core/input';
 import { apples } from '../world/trees';
 import { groundMesh } from '../world/ground';
 import { barn } from '../world/barn';
-import { ownerApple, roomForMore, outOfReach } from './picking';
+import { ownerApple, roomForMore, readyFor } from './picking';
 import { walkTo, walkToApple, walkToBarn } from './controller';
 import { toast, hideHint } from '../ui/hud';
 
@@ -36,7 +36,7 @@ export function initInteraction(){
         toast('The basket will not hold another — take it to the barn');
         return;
       }
-      const why = outOfReach(a);
+      const why = readyFor(a);
       if(why){ toast(why); return; }
       walkToApple(a); hideHint();
       return;

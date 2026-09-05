@@ -1,8 +1,8 @@
 /* ============================================================
    Game state, and the versioned save behind it
    ============================================================ */
-import type { AppleType } from './config';
-import { TYPE_KEYS } from './config';
+import type { AppleType, GoodId, MachineId, PlotId } from './config';
+import { TYPE_KEYS, GOOD_KEYS, MACHINE_KEYS, PLOT_KEYS, SAPLING_STAGES, applyPlots } from './config';
 
 export type ToolId = 'picker' | 'ladder' | 'barrow' | 'shears' | 'lantern';
 
@@ -15,12 +15,23 @@ export interface Settings {
   invertY: boolean;
 }
 
+/** an order in the post, due on the morning of `due` */
+export interface Order { kind: 'machine' | 'sapling' | 'plot'; id: string; qty: number; due: number }
+/** a machine loaded last thing, with the goods due in the morning */
+export interface Batch { machine: MachineId; good: GoodId; due: number }
+/** a whip in the ground, one stage nearer bearing every morning */
+export interface Sapling { x: number; z: number; stage: number }
+/** a tree grown from one of those, rebuilt on load */
+export interface Planted { x: number; z: number; scale: number }
+
 export interface State {
   basket: Record<AppleType, number>;
   stored: Record<AppleType, number>;
   discovered: Partial<Record<AppleType, boolean>>;
   picked: number;
   deposited: number;
+  /** how much is left in the bear's legs, 0..1 */
+  vigour: number;
   day: number;
   dayT: number;
   settings: Settings;
@@ -32,41 +43,83 @@ export interface State {
   /** where the barrow is parked, and what is in it */
   barrow: { x: number; z: number; ry: number; load: Record<AppleType, number> } | null;
   prunedTrees: number[];
+
+  /* ---- the catalogue ---- */
+  /** shillings */
+  purse: number;
+  /** what the season has earned, all told */
+  sold: number;
+  goods: Record<GoodId, number>;
+  machines: MachineId[];
+  plots: PlotId[];
+  /** saplings delivered and waiting to go in the ground */
+  saplings: number;
+  post: Order[];
+  batches: Batch[];
+  growing: Sapling[];
+  planted: Planted[];
 }
 
 const zero = () => ({ honeycrisp:0, grannysmith:0, golden:0, rare:0 });
+export const zeroGoods = (): Record<GoodId, number> => ({ cider:0, jelly:0, rings:0 });
 
 export const state: State = {
   basket: zero(),
   stored: zero(),
   discovered: {},
-  picked: 0, deposited: 0, day: 1, dayT: 0.34,
+  picked: 0, deposited: 0, vigour: 1, day: 1, dayT: 0.34,
   settings: { shadows:true, outlines:true, petals:true, calm:false, map:true, invertY:false },
   carried: [],
   equipped: null,
   ladder: null,
   barrow: null,
   prunedTrees: [],
+  purse: 0, sold: 0,
+  goods: zeroGoods(),
+  machines: [], plots: [], saplings: 0,
+  post: [], batches: [], growing: [], planted: [],
 };
 
-const SAVE_KEY = 'orchardhours.save.v3';
+const SAVE_KEY = 'orchardhours.save.v4';
+const SAVE_KEY_V3 = 'orchardhours.save.v3';
 const SAVE_KEY_V2 = 'orchardhours.save.v2';
 
 export function save(){
   try{
     localStorage.setItem(SAVE_KEY, JSON.stringify({
       stored: state.stored, discovered: state.discovered, picked: state.picked,
-      deposited: state.deposited, day: state.day, settings: state.settings,
+      deposited: state.deposited, vigour: state.vigour, day: state.day, settings: state.settings,
       carried: state.carried, equipped: state.equipped,
       ladder: state.ladder, barrow: state.barrow, prunedTrees: state.prunedTrees,
+      purse: state.purse, sold: state.sold, goods: state.goods,
+      machines: state.machines, plots: state.plots, saplings: state.saplings,
+      post: state.post, batches: state.batches,
+      growing: state.growing, planted: state.planted,
     }));
   }catch{ /* private browsing, a full disk — the orchard plays on regardless */ }
 }
 
+/* ---- the small guards the reader above leans on ---- */
+const num = (v: unknown, fallback: number) =>
+  typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+
+function ids<T extends string>(v: unknown, allowed: readonly T[]): T[] {
+  if(!Array.isArray(v)) return [];
+  return [...new Set(v.filter((x): x is T => allowed.includes(x as T)))];
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function list<T>(v: unknown, cap: number, shape: (row: any) => T): T[] {
+  if(!Array.isArray(v)) return [];
+  return v.filter(r => r && typeof r === 'object').slice(0, cap).map(shape);
+}
+
 export function load(){
   try{
-    /* v3 first; fall back to a v2 season and carry it forward */
-    const raw = localStorage.getItem(SAVE_KEY) ?? localStorage.getItem(SAVE_KEY_V2);
+    /* newest first; an older season is read and carried forward */
+    const raw = localStorage.getItem(SAVE_KEY)
+      ?? localStorage.getItem(SAVE_KEY_V3)
+      ?? localStorage.getItem(SAVE_KEY_V2);
     if(!raw) return;
     const d = JSON.parse(raw) as Partial<State>;
     Object.assign(state.stored, d.stored ?? {});
@@ -74,6 +127,7 @@ export function load(){
     Object.assign(state.settings, d.settings ?? {});
     state.picked = d.picked ?? 0;
     state.deposited = d.deposited ?? 0;
+    state.vigour = typeof d.vigour === 'number' ? d.vigour : 1;
     state.day = d.day ?? 1;
     /* fields a v2 save simply will not have — the defaults above stand */
     if(Array.isArray(d.carried)) state.carried = d.carried;
@@ -81,7 +135,39 @@ export function load(){
     if(d.ladder !== undefined) state.ladder = d.ladder;
     if(d.barrow !== undefined) state.barrow = d.barrow;
     if(Array.isArray(d.prunedTrees)) state.prunedTrees = d.prunedTrees;
+
+    /* ---- the catalogue, read defensively ----
+       These are the only saved fields the world builds geometry from, so a
+       hand-edited or half-written key must not take the orchard down with it. */
+    state.purse = num(d.purse, 0);
+    state.sold  = num(d.sold, 0);
+    for(const k of GOOD_KEYS) state.goods[k] = Math.max(0, Math.round(num(d.goods?.[k], 0)));
+    state.saplings = Math.max(0, Math.round(num(d.saplings, 0)));
+    state.machines = ids(d.machines, MACHINE_KEYS);
+    state.plots    = ids(d.plots, PLOT_KEYS);
+    state.post = list(d.post, 40, o => ({
+      kind: o.kind === 'machine' || o.kind === 'sapling' || o.kind === 'plot' ? o.kind : null,
+      id: typeof o.id === 'string' ? o.id : null,
+      qty: Math.max(1, Math.round(num(o.qty, 1))),
+      due: Math.max(1, Math.round(num(o.due, 1))),
+    })).filter(o => o.kind && o.id) as Order[];
+    state.batches = list(d.batches, 12, b => ({
+      machine: MACHINE_KEYS.includes(b.machine) ? b.machine : null,
+      good: GOOD_KEYS.includes(b.good) ? b.good : null,
+      due: Math.max(1, Math.round(num(b.due, 1))),
+    })).filter(b => b.machine && b.good) as Batch[];
+    state.growing = list(d.growing, 80, g => ({
+      x: num(g.x, NaN), z: num(g.z, NaN),
+      stage: Math.max(0, Math.min(SAPLING_STAGES, Math.round(num(g.stage, 0)))),
+    })).filter(g => Number.isFinite(g.x) && Number.isFinite(g.z)) as Sapling[];
+    state.planted = list(d.planted, 80, p => ({
+      x: num(p.x, NaN), z: num(p.z, NaN),
+      scale: Math.max(0.6, Math.min(1.4, num(p.scale, 1))),
+    })).filter(p => Number.isFinite(p.x) && Number.isFinite(p.z)) as Planted[];
   }catch{ /* a corrupt save should not cost you the game */ }
+
+  /* the farm may be bigger than the fence constants before anything reads them */
+  applyPlots(state.plots);
 }
 
 /* the season is read back the moment this module is pulled in, so every world
@@ -89,12 +175,21 @@ export function load(){
 load();
 
 export function resetSeason(){
-  try{ localStorage.removeItem(SAVE_KEY); localStorage.removeItem(SAVE_KEY_V2); }catch{ /* ignore */ }
+  try{
+    localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem(SAVE_KEY_V3);
+    localStorage.removeItem(SAVE_KEY_V2);
+  }catch{ /* ignore */ }
   TYPE_KEYS.forEach(k => { state.stored[k] = 0; state.basket[k] = 0; });
   state.discovered = {};
-  state.picked = 0; state.deposited = 0; state.day = 1;
+  state.picked = 0; state.deposited = 0; state.day = 1; state.vigour = 1;
   state.carried = []; state.equipped = null;
   state.ladder = null; state.barrow = null; state.prunedTrees = [];
+  state.purse = 0; state.sold = 0;
+  state.goods = zeroGoods();
+  state.machines = []; state.plots = []; state.saplings = 0;
+  state.post = []; state.batches = []; state.growing = []; state.planted = [];
+  applyPlots(state.plots);
 }
 
 export const basketTotal   = () => TYPE_KEYS.reduce((n,k)=> n + state.basket[k], 0);
