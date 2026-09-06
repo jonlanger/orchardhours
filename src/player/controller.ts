@@ -3,6 +3,7 @@
    Two ways in: the keys (camera-relative) or a tapped point.
    ============================================================ */
 import * as THREE from 'three';
+import { BARROW_PACE, BARROW_REACH, BARROW_HALF_W } from '../core/config';
 import { state } from '../core/save';
 import { on, emit } from '../core/bus';
 import { move as moveAxis, held, pressed } from '../core/input';
@@ -57,11 +58,19 @@ export function stopClimb(hop = false){
 let moveTarget: THREE.Vector3 | null = null;
 let queuedApple: Apple | null = null;
 let queuedBarn = false;
+/** something to do on arrival that is not an apple or the barn door */
+let queuedTask: (() => void) | null = null;
 let walkT = 0, rungT = 0, squash = 0, hop = 0, hopV = 0;
 
 export function walkTo(p: THREE.Vector3){
   moveTarget = p.clone();
-  queuedApple = null; queuedBarn = false;
+  queuedApple = null; queuedBarn = false; queuedTask = null;
+}
+
+/** walk over there and then do this — gathering a windfall comes through here */
+export function walkToDo(p: THREE.Vector3, task: () => void){
+  moveTarget = p.clone();
+  queuedApple = null; queuedBarn = false; queuedTask = task;
 }
 export function walkToApple(a: Apple){
   /* up a ladder there is no walking to be done — reach from where you are */
@@ -70,22 +79,50 @@ export function walkToApple(a: Apple){
     return;
   }
   moveTarget = a.standPoint.clone();
-  queuedApple = a; queuedBarn = false;
+  queuedApple = a; queuedBarn = false; queuedTask = null;
 }
 export function walkToBarn(){
   moveTarget = barnDoorPoint.clone();
-  queuedApple = null; queuedBarn = true;
+  queuedApple = null; queuedBarn = true; queuedTask = null;
 }
-export function stopWalking(){ moveTarget = null; queuedApple = null; queuedBarn = false; }
+export function stopWalking(){
+  moveTarget = null; queuedApple = null; queuedBarn = false; queuedTask = null;
+}
 
 on('walk:to', ({ point }) => walkTo(point));
 on('walk:barn', () => walkToBarn());
 
 const _want = new THREE.Vector3(), _tmp = new THREE.Vector3();
+const _probe = new THREE.Vector3(), _was = new THREE.Vector3();
+
+/** true while the barrow is out in front on its handles */
+export const pushingBarrow = () => state.carried.includes('barrow');
+
+/**
+ * The barrow runs a good two metres out in front of the bear, and a tray that
+ * wide will not go past a trunk the bear itself can squeeze by. Probe where
+ * the tray and the wheel actually are, and hand whatever they foul back to
+ * the bear as a push — so the barrow is stopped by trees, walls and the fence
+ * instead of sliding through them.
+ */
+function clearBarrow(){
+  const p = character.position;
+  const fx = Math.sin(character.rotation.y), fz = Math.cos(character.rotation.y);
+  for(const reach of BARROW_REACH){
+    _probe.set(p.x + fx*reach, p.y, p.z + fz*reach);
+    _was.copy(_probe);
+    resolve(_probe, BARROW_HALF_W);
+    p.x += _probe.x - _was.x;
+    p.z += _probe.z - _was.z;
+  }
+  resolve(p, BODY_RADIUS);
+}
 
 export function updateController(dt: number, time: number){
   const busy = picking() || antics.busy;
   const running = held('run') && !spent();
+  /* a loaded barrow is heavy: it carries three baskets and it costs the legs */
+  const load = pushingBarrow() ? BARROW_PACE : 1;
 
   if(climb){
     updateClimb(dt);
@@ -101,12 +138,12 @@ export function updateController(dt: number, time: number){
     _want.copy(camForward).multiplyScalar(moveAxis.y)
          .addScaledVector(camRight, moveAxis.x);
     if(_want.lengthSq() > 1) _want.normalize();
-    _want.multiplyScalar((running ? RUN_SPEED : WALK_SPEED) * pace());
+    _want.multiplyScalar((running ? RUN_SPEED : WALK_SPEED) * pace() * load);
   } else if(moveTarget && !busy && !antics.sitting){
     _tmp.subVectors(moveTarget, character.position); _tmp.y = 0;
     const dist = _tmp.length();
     if(dist > ARRIVE_EPS){
-      _want.copy(_tmp).divideScalar(dist).multiplyScalar(Math.min(WALK_SPEED*pace(), dist*4));
+      _want.copy(_tmp).divideScalar(dist).multiplyScalar(Math.min(WALK_SPEED*pace()*load, dist*4));
     } else {
       character.position.x = moveTarget.x;
       character.position.z = moveTarget.z;
@@ -114,6 +151,7 @@ export function updateController(dt: number, time: number){
       player.vel.set(0,0,0);
       if(queuedApple && !queuedApple.picked){ startPick(queuedApple); queuedApple = null; }
       if(queuedBarn){ queuedBarn = false; emit('arrive:barn'); }
+      if(queuedTask){ const task = queuedTask; queuedTask = null; task(); }
     }
   }
 
@@ -159,6 +197,8 @@ export function updateController(dt: number, time: number){
     character.rotation.y += d * Math.min(1, dt*11);
   }
 
+  if(pushingBarrow()) clearBarrow();
+
   animate(dt, time);
 }
 
@@ -195,7 +235,7 @@ const lerp = (a: number, b: number, p: number) => a + (b-a)*p;
 
 function animate(dt: number, time: number){
   const gaitAmt = Math.min(1.25, player.speed / WALK_SPEED);
-  const pushing = state.carried.includes('barrow');
+  const pushing = pushingBarrow();
   const droop = tired() ? 1 - Math.max(0, (state.vigour - 0)/0.36) : 0;
 
   if(climb){

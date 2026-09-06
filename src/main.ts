@@ -24,10 +24,10 @@ async function main(){
   const sky = await boot.stage('Raising the sky', W.sky, () => import('./world/sky'));
   const trees = await boot.stage('Planting the rows', W.rows, () => import('./world/trees'));
 
-  const [barn, barnInterior, desk, machines, economy] = await boot.stage('Building the barn', W.barn, () =>
+  const [barn, barnInterior, silo, desk, machines, economy] = await boot.stage('Building the barn', W.barn, () =>
     Promise.all([import('./world/barn'), import('./world/barnInterior'),
-                 import('./world/desk'), import('./world/machines'),
-                 import('./core/economy')]));
+                 import('./world/silo'), import('./world/desk'),
+                 import('./world/machines'), import('./core/economy')]));
 
   const props = await boot.stage('Letting the grass in', W.grass, () => import('./world/props'));
   const saplings = await boot.stage('Setting the young trees', W.saplings, () => import('./world/saplings'));
@@ -85,9 +85,11 @@ async function main(){
     economy.overnight(day);
     machines.refreshMachines();
     saplings.overnight();
-    const back = trees.regrowOvernight();
+    /* the heap goes out on the rows first, and the trees set the better for it */
+    const fed = economy.spreadCompost();
+    const back = trees.regrowOvernight(fed);
     hud.toast(back
-      ? `Day ${day}. The trees have set ${back} more apples overnight.`
+      ? `Day ${day}. The trees have set ${back} more apples overnight${fed ? ', the composted rows best of all' : ''}.`
       : `Day ${day} in the orchard.`);
   });
 
@@ -134,7 +136,7 @@ async function main(){
     recenterBehind: cameraRig.recenterBehind,
     openMap: minimap.openMap, closeMap: minimap.closeMap, mapOpen: minimap.mapOpen,
     apples: trees.apples, trees: trees.trees, barn, tools, interact, antics, vigour,
-    economy, desk, machines, saplings, land,
+    economy, desk, machines, saplings, land, silo,
     canReach: picking.canReach, refreshBarrels: barnInterior.refreshBarrels,
     deposit: overlays.deposit,
     /** advance the world by hand — used by automated checks */

@@ -29,7 +29,20 @@ export const TYPE_WEIGHTS: [AppleType, number][] =
   [['honeycrisp',0.34],['grannysmith',0.29],['golden',0.31],['rare',0.06]];
 
 export const BASKET_CAPACITY = 24;
-export const BARROW_CAPACITY = 60;
+/** three basketfuls — what the barrow is for */
+export const BARROW_CAPACITY = 72;
+/**
+ * A loaded barrow is heavy and it steers badly. Everything the legs can do is
+ * multiplied by this while it is being pushed, which is the price of the load.
+ */
+export const BARROW_PACE = 0.62;
+/**
+ * How far out in front of the bear the tray and the wheel run. Collision
+ * probes at these distances are what stop a barrow being walked through a
+ * trunk while the bear itself passes cleanly to one side of it.
+ */
+export const BARROW_REACH = [1.35, 2.00];
+export const BARROW_HALF_W = 0.36;
 
 /**
  * How high a bear on the ground can reach, measured from its feet — far enough
@@ -38,7 +51,19 @@ export const BARROW_CAPACITY = 60;
 export const REACH_FROM_FEET = 2.5;
 /** what the picking pole adds to that; the two together are the old reach */
 export const PICKER_BONUS = 4.2;
-export const CRATE_CAPACITY  = 60;
+
+/* ============================================================
+   How much fruit the farm can put away.
+
+   One barrel per variety to begin with. The barn extension frames four
+   more along the west wall and opens the silo behind it, and the store
+   grows by both.
+   ============================================================ */
+export const CRATE_CAPACITY = 60;
+/** each of the four barrels the extension adds */
+export const EXTRA_BAY_CAPACITY = 60;
+/** and what the silo takes behind them, per variety */
+export const SILO_CAPACITY = 120;
 
 /* orchard planting plan — real rows */
 export const ROWS = 4, PER_ROW = 5;
@@ -75,6 +100,36 @@ export const TIRED = 0.36, SPENT = 0.13;
 
 /** how hard an apple leaves the paw */
 export const THROW_SPEED = 10.5;
+
+/* ============================================================
+   Ripening.
+
+   Every apple that is set runs one cycle and one only: it colours up, comes
+   to its best for a few minutes, and if nobody takes it in that window the
+   stem gives and it goes into the grass. The wait is spread very wide and
+   the best is short, so only a tenth or so of a tree is ever at its peak —
+   which is the whole point of marking them.
+   ============================================================ */
+/** seconds from being set to the beginning of its best */
+export const RIPEN_MIN = 45, RIPEN_MAX = 1500;
+/** how long the best lasts — a few minutes, and no longer */
+export const PRIME_MIN = 140, PRIME_MAX = 205;
+/** and how long it hangs on past that before it drops */
+export const PAST_MIN = 25, PAST_MAX = 65;
+
+/* ============================================================
+   Windfalls.
+
+   Anything off the ground is bruised. The merchant will not have it and it
+   will not keep, but rotted down and spread back on the rows it pays for
+   itself in next morning's set.
+   ============================================================ */
+/** windfalls the bear can carry before the sack is full */
+export const SACK_CAPACITY = 40;
+/** what one composted windfall adds to a tree's chance of setting overnight */
+export const COMPOST_BOOST = 0.010;
+/** and the most the heap can ever be worth in one morning */
+export const COMPOST_MAX_BOOST = 0.34;
 
 /* ============================================================
    The mail-order catalogue — what things fetch, and what they cost.
@@ -118,6 +173,17 @@ export const MACHINE_KEYS = Object.keys(MACHINES) as MachineId[];
 
 /** a press is not fed russets; they are worth more in the barrel */
 export const TOO_GOOD_TO_PRESS: AppleType = 'rare';
+
+/* ---- what is built onto the farm rather than stood in it ---- */
+export type UpgradeId = 'extension';
+export interface UpgradeDef { label: string; price: number; note: string; foot: string }
+export const UPGRADES = {
+  extension: { label:'Barn extension', price:640,
+    note:'Four more barrels framed along the west wall, and the old silo swept out, unboarded and a chute run through to it from the barn.',
+    foot:'four barrels and the silo' },
+} satisfies Record<UpgradeId, UpgradeDef>;
+
+export const UPGRADE_KEYS = Object.keys(UPGRADES) as UpgradeId[];
 
 export const SAPLING_PRICE = 90;
 /** mornings from a planted whip to a tree in fruit */

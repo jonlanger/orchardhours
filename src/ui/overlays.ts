@@ -2,12 +2,13 @@
    Overlays — the pause menu, and the barn's paper record:
    almanac, ledger, settings, about
    ============================================================ */
-import { APPLE_TYPES, TYPE_KEYS, CRATE_CAPACITY, GOODS, GOOD_KEYS } from '../core/config';
+import { APPLE_TYPES, TYPE_KEYS, GOODS, GOOD_KEYS, UPGRADES } from '../core/config';
 import type { AppleType } from '../core/config';
-import { state, save, resetSeason, basketTotal, storedTotal, varietiesFound } from '../core/save';
+import { state, save, resetSeason, basketTotal, storedTotal, varietiesFound,
+         built, storeCap } from '../core/save';
 import { emit, on } from '../core/bus';
 import { isTouch } from '../core/input';
-import { apples, trees, regrowAll } from '../world/trees';
+import { apples, trees, regrowAll, primeCount, dropped } from '../world/trees';
 import { SPAWN } from '../player/rig';
 import { updateBasketFruit } from '../player/picking';
 import { clearFalls } from '../player/antics';
@@ -81,6 +82,10 @@ const LORE = [
     body:'Most apples cannot pollinate themselves. A block of one variety sets almost nothing, so orchards interplant a second variety that blooms at the same time, and keep bees within flying distance of both.' },
   { title:'Where a new tree comes from', need:()=> state.saplings > 0 || state.growing.length > 0,
     body:'A nursery sapling is two trees at once: a rootstock chosen for how big it will let the tree get, and a scion of the variety you actually want, grafted on above it. Buy a dwarfing rootstock and the tree bears in three years and stays inside a ladder\'s reach; buy a vigorous one and you will be picking off the top of a long pole for a generation.' },
+  { title:'The few minutes an apple is right', need:()=> state.picked >= 5,
+    body:'Ripeness is not a state an apple sits in, it is a place it passes through. Growers walk the same block three and four times over a fortnight, taking only what is ready and leaving the rest, because a whole tree is never ready at once. What is at its best wears a look you learn to spot from the alley — and what you leave too long lets go of the spur on its own.' },
+  { title:'What the ground crop is for', need:()=> state.composted > 0 || state.bruised > 0,
+    body:'Anything picked up off the ground is a windfall, and no packing house on earth will take it: a bruise is a broken cell wall, and the rot follows it in within days. It is not waste, though. Windfalls go to the jelly pan, to the cider mill, or — simplest of all — back onto the rows, where the ground gives them to the roots that dropped them.' },
   { title:'Sleeping through the winter', need:()=> state.deposited >= 20,
     body:'Cold storage slows an apple down; controlled-atmosphere storage nearly stops it, dropping the oxygen until the fruit barely breathes. It is why an apple picked in October is crisp the following June.' },
 ];
@@ -110,7 +115,7 @@ export function renderBarn(){
     head.textContent = 'The season so far';
     const barrels = TYPE_KEYS.map(k => {
       const def = APPLE_TYPES[k];
-      const pct = Math.round(Math.min(1, state.stored[k]/CRATE_CAPACITY)*100);
+      const pct = Math.round(Math.min(1, state.stored[k]/storeCap())*100);
       return `<div class="stat"><b>${state.stored[k]}</b><span>${state.discovered[k]?def.label:'Unlabelled'}</span>
         <div class="bar"><i style="width:${pct}%;background:${def.crate}"></i></div></div>`;
     }).join('');
@@ -120,6 +125,8 @@ export function renderBarn(){
       <div class="stat"><b>${basketTotal()}</b><span>In hand</span></div>
       <div class="stat"><b>${varietiesFound()}/${TYPE_KEYS.length}</b><span>Varieties</span></div>
       <div class="stat"><b>${state.prunedTrees.length}</b><span>Trees pruned</span></div>
+      <div class="stat"><b>${primeCount()}</b><span>At their best now</span></div>
+      <div class="stat"><b>${state.composted}</b><span>Composted</span></div>
       <div class="stat"><b>${state.day}</b><span>Day</span></div>
       <div class="stat"><b>${state.purse}</b><span>Shillings</span></div>
       <div class="stat"><b>${state.sold}</b><span>Earned this season</span></div>
@@ -127,13 +134,17 @@ export function renderBarn(){
         <div class="bar"><i style="width:${Math.round(state.vigour*100)}%;background:${
           state.vigour < 0.13 ? '#9E3F2B' : state.vigour < 0.36 ? '#D9A441' : '#8FBF4F'}"></i></div></div>
     </div>
-    <p class="lede" style="margin:16px 0 10px">The barrels along the barn wall:</p>
+    <p class="lede" style="margin:16px 0 10px">The barrels along the barn wall — ${storeCap()} of each variety${
+      built('extension') ? ', counting the bays and the silo' : ', and the extension would take a great deal more'}:</p>
     <div class="stat-grid">${barrels}</div>
     ${GOOD_KEYS.some(g => state.goods[g]) ? `
       <p class="lede" style="margin:16px 0 10px">On the shelf, made from what the barrels held:</p>
       <div class="stat-grid">${GOOD_KEYS.filter(g => state.goods[g]).map(g =>
         `<div class="stat"><b>${state.goods[g]}</b><span>${GOODS[g].plural}</span></div>`).join('')}</div>` : ''}
-    <p class="lede" style="margin-top:16px">${trees.length} trees, ${apples.length} apples set this season. ${apples.filter(a=>!a.picked).length} still on the branch${state.growing.length ? `, and ${state.growing.length} young ${state.growing.length===1?'tree':'trees'} coming on` : ''}.</p>`;
+    <p class="lede" style="margin-top:16px">${trees.length} trees, ${apples.length} apples set this season. ${apples.filter(a=>!a.picked).length} still on the branch${state.growing.length ? `, and ${state.growing.length} young ${state.growing.length===1?'tree':'trees'} coming on` : ''}.</p>
+    <p class="lede">${dropped} ${dropped === 1 ? 'apple has' : 'apples have'} gone over into the grass for want of picking${
+      state.bruised ? `, and there ${state.bruised === 1 ? 'is one windfall' : `are ${state.bruised} windfalls`} in the sack` : ''}${
+      state.composting ? `. ${state.composting} ${state.composting === 1 ? 'is' : 'are'} rotting down in the compost barrel` : ''}.</p>`;
   }
 
   else if(barnTab === 'catalogue'){
@@ -179,6 +190,9 @@ export function renderBarn(){
         <div class="card"><h3>Resting up</h3><p>Reaching all day is work, and the meter under the buttons is what Pom has left. <b>F</b> eats an apple out of the basket, <b>C</b> sits down in the grass, and a night's sleep puts it all back. <b>R</b> throws one down the alley, for no reason at all.</p></div>
         <div class="card"><h3>Tools</h3><p><b>1</b>–<b>5</b> take a tool out, <b>X</b> puts it away, <b>E</b> uses whatever is in front of you. Tools live on the rack inside the barn.</p></div>
         <div class="card"><h3>The catalogue</h3><p>There is a writing desk in the barn with a merchant's catalogue on it. Sell fruit out of the barrels, and the cider, jelly and dried rings the barn makes from it. Everything ordered — a press, a kettle, a rack, saplings, or the deed to the next field — comes with the following morning's post.</p></div>
+        <div class="card"><h3>Ripeness</h3><p>Every apple comes to its best once, and stays there only a few minutes. The ones wearing a ring of pale, pulsing marks are ready now — take those first. Anything left too long lets go of the branch and lands in the grass.</p></div>
+        <div class="card"><h3>Windfalls</h3><p>Whatever is on the ground is bruised, and the merchant will not buy it and the barrels will not keep it. Tap one and Pom walks over and stoops for it, or press <b>E</b> standing beside it. Tip the sack into the compost barrel in the barn and it goes back on the rows overnight, so the trees set the heavier for it.</p></div>
+        <div class="card"><h3>The barrow</h3><p>Three basketfuls of overflow, so a good tree does not send you back to the barn halfway through. It is slow going with one, and the tray will not fit between the trunks the way you do — take the wide way round.</p></div>
         <div class="card"><h3>The barn</h3><p>Walk in through the doors. Tip the basket into the barrels along the wall, read the chalkboard, and take what you need off the rack. <b>M</b> opens the plan, <b>Esc</b> the menu.</p></div>
       </div>`;
   }
@@ -217,21 +231,33 @@ export function initOverlays(){
  * barrels. The barn interior calls this when you press E at one.
  */
 export function deposit(only: AppleType | null, includeBarrow = false){
-  let moved = 0;
+  const cap = storeCap();
+  let moved = 0, refused = 0;
+
   for(const k of TYPE_KEYS){
     if(only && k !== only) continue;
-    moved += state.basket[k];
-    state.stored[k] += state.basket[k];
-    state.basket[k] = 0;
-    if(includeBarrow && state.barrow){
-      moved += state.barrow.load[k];
-      state.stored[k] += state.barrow.load[k];
-      state.barrow.load[k] = 0;
-    }
+    let room = Math.max(0, cap - state.stored[k]);
+    /** put what will fit away, and hand back what will not */
+    const tip = (have: number) => {
+      const n = Math.min(have, room);
+      room -= n; state.stored[k] += n; moved += n; refused += have - n;
+      return have - n;
+    };
+    state.basket[k] = tip(state.basket[k]);
+    if(includeBarrow && state.barrow) state.barrow.load[k] = tip(state.barrow.load[k]);
   }
-  if(!moved) return 0;
+
+  if(!moved){
+    if(refused) toast(built('extension')
+      ? 'The barrels and the silo are both full to the head. Sell some of it at the desk.'
+      : `Full to the head. The catalogue sells a ${UPGRADES.extension.label.toLowerCase()} — four more barrels and the silo behind them.`);
+    return 0;
+  }
+
   state.deposited += moved;
+  emit('store:changed');
   renderBasket(); updateBasketFruit(); renderBarn(); save();
-  toast(`${moved} ${moved===1?'apple':'apples'} into the ${only ? APPLE_TYPES[only].label + ' barrel' : 'barrels'}`);
+  toast(`${moved} ${moved===1?'apple':'apples'} into the ${only ? APPLE_TYPES[only].label + ' barrel' : 'barrels'}`
+    + (refused ? ` — ${refused} would not fit; the store is full` : ''));
   return moved;
 }

@@ -2,9 +2,11 @@
    Trees — trunk, recursive limbs, layered canopy, hung fruit
    ============================================================ */
 import * as THREE from 'three';
-import { ROWS, PER_ROW, TREE_SPACING, TYPE_WEIGHTS, REACH_FROM_FEET } from '../core/config';
+import { ROWS, PER_ROW, TREE_SPACING, TYPE_WEIGHTS, REACH_FROM_FEET,
+         RIPEN_MIN, RIPEN_MAX, PRIME_MIN, PRIME_MAX, PAST_MIN, PAST_MAX } from '../core/config';
 import type { AppleType } from '../core/config';
 import { scene } from '../core/renderer';
+import { emit } from '../core/bus';
 import { addOutline, orient, fadeGroup } from '../core/materials';
 import type { Fadeable } from '../core/materials';
 import { state } from '../core/save';
@@ -12,7 +14,7 @@ import { groundHeightAt, rowZ } from './ground';
 import { addSolid } from './collision';
 import {
   BRANCH_GEO, TRUNK_GEO, CANOPY_GEOS, BARK_MAT, BARK_DARK, CANOPY_BASE,
-  buildApple, APPLE_SCALE, toonSoft,
+  buildApple, buildRipeMark, MARK_MATS, APPLE_SCALE, toonSoft,
 } from './geometry';
 
 /* by hand: reach up, cup it, roll it, twist it free, carry it down.
@@ -54,6 +56,16 @@ export interface Apple {
   home: THREE.Vector3;
   /** out of arm's reach from the ground — the picker pole exists for these */
   high: boolean;
+
+  /* ---- ripening, in seconds of orchard time ---- */
+  /** when it comes into its best */
+  primeAt: number;
+  /** when it goes out of it again */
+  pastAt: number;
+  /** and when the stem finally gives */
+  dropAt: number;
+  /** the pulsing marks it wears while it is at its best, or null */
+  mark: THREE.Group | null;
 }
 
 export interface TreeData extends Fadeable {
@@ -65,10 +77,59 @@ export interface TreeData extends Fadeable {
 export const apples: Apple[] = [];
 export const trees: THREE.Group[] = [];
 
+/**
+ * Orchard time, in seconds, advanced by the frame. Ripening runs off this
+ * rather than the wall clock so a backgrounded tab does not come back to a
+ * carpet of windfalls.
+ */
+let clock = 0;
+export const orchardClock = () => clock;
+
 export const treeData = (t: THREE.Group) => t.userData as TreeData;
 
 /** fruit a bear can reach standing on the ground, and so pick by hand */
 export const REACH_Y = REACH_FROM_FEET;
+
+/**
+ * When one apple will come to its best, and when it will give up. Rolled fresh
+ * every time an apple is set, so a tree that has just been picked over does not
+ * ripen its whole crop in step.
+ */
+function setRipeSchedule(a: Apple, from = clock){
+  a.primeAt = from + RIPEN_MIN + Math.random()*(RIPEN_MAX - RIPEN_MIN);
+  a.pastAt  = a.primeAt + PRIME_MIN + Math.random()*(PRIME_MAX - PRIME_MIN);
+  a.dropAt  = a.pastAt  + PAST_MIN  + Math.random()*(PAST_MAX  - PAST_MIN);
+}
+
+/** at its best, and worth crossing the row for */
+export const isPrime = (a: Apple) =>
+  !a.picked && clock >= a.primeAt && clock < a.pastAt;
+/** hanging on past its best — it will be in the grass shortly */
+export const isPast = (a: Apple) => !a.picked && clock >= a.pastAt;
+export const primeCount = () => apples.reduce((n, a) => n + (isPrime(a) ? 1 : 0), 0);
+
+/** how big it has swollen: it comes up to full size as it colours */
+const SWELL = 260;
+function ripeSize(a: Apple){
+  if(clock >= a.primeAt) return 1;
+  return 0.82 + 0.18*Math.max(0, Math.min(1, (clock - (a.primeAt - SWELL))/SWELL));
+}
+
+/* the marks are pooled: a tenth of the crop wears them at any one time, and
+   they come and go all afternoon */
+const markPool: THREE.Group[] = [];
+let markMade = 0;
+function wearMark(a: Apple){
+  const m = markPool.pop() ?? buildRipeMark(MARK_MATS[markMade++ % MARK_MATS.length]!);
+  a.group.add(m);
+  a.mark = m;
+}
+function dropMark(a: Apple){
+  if(!a.mark) return;
+  a.group.remove(a.mark);
+  markPool.push(a.mark);
+  a.mark = null;
+}
 
 function pickType(): AppleType {
   const r = Math.random(); let acc = 0;
@@ -236,12 +297,16 @@ export function buildTree(x: number, z: number, scale: number, index: number){
     twig.scale.set(0.020*scale, 0.26*scale, 0.020*scale);
     g.add(twig);
 
-    apples.push({
+    const a: Apple = {
       group: fruit, type, picked:false, treeGroup:g, treeIndex:index,
       standPoint: new THREE.Vector3(), worldPos: new THREE.Vector3(),
       anim:null, sway:Math.random()*Math.PI*2, home:p.clone(),
       high: p.y > REACH_Y,
-    });
+      primeAt:0, pastAt:0, dropAt:0, mark:null,
+    };
+    setRipeSchedule(a);
+    fruit.scale.setScalar(APPLE_SCALE*ripeSize(a));
+    apples.push(a);
   }
 
   // everything the fade-out needs: the leaf materials, the ink hulls, and the canopy height
@@ -317,17 +382,53 @@ for(const t of trees) registerTrunk(t);
 scene.updateMatrixWorld(true);
 bakeStandPoints(0);
 
-/* ---- per-frame: sway, and fading whatever stands between eye and bear ---- */
+/* ---- per-frame: sway, ripening, and fading whatever stands between eye and bear ---- */
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _camDir = new THREE.Vector3();
+const _fell = new THREE.Vector3();
+
+/** how many have gone into the grass, all told — the ledger reads it */
+export let dropped = 0;
 
 export function updateTrees(dt: number, time: number, camPos: THREE.Vector3, focus: THREE.Vector3){
   const windScale = state.settings.calm ? 0.45 : 1;
+  clock += dt;
+
+  /* the marks breathe together, three phases apart, out of one set of materials */
+  for(let i=0;i<MARK_MATS.length;i++){
+    MARK_MATS[i]!.opacity = 0.32 + 0.34*(0.5 + 0.5*Math.sin(time*1.9 + i*2.1));
+  }
 
   for(const a of apples){
+    /* the marks belong to fruit on the branch: the moment a reach starts they
+       come off, rather than riding the apple down into the basket */
+    if(a.mark && (a.picked || a.anim)) dropMark(a);
     if(a.picked || a.anim) continue;
+
+    /* past its best and past hanging on: the stem gives and the grass has it */
+    if(clock >= a.dropAt){
+      a.group.getWorldPosition(_fell);
+      dropMark(a);
+      a.picked = true;
+      a.group.visible = false;
+      a.group.scale.setScalar(APPLE_SCALE);
+      dropped++;
+      emit('apple:fell', { type:a.type, at:_fell.clone() });
+      continue;
+    }
+
     const s = Math.sin(time*1.6 + a.sway);
     a.group.position.y = a.home.y + s*0.018*windScale;
     a.group.rotation.z = s*0.10*windScale;
+    a.group.scale.setScalar(APPLE_SCALE*ripeSize(a));
+
+    /* at its best: the marks come on, turn to face whoever is looking, and pulse */
+    const prime = clock >= a.primeAt && clock < a.pastAt;
+    if(prime && !a.mark) wearMark(a);
+    else if(!prime && a.mark) dropMark(a);
+    if(a.mark){
+      a.mark.lookAt(camPos);
+      a.mark.scale.setScalar(0.94 + Math.sin(time*2.4 + a.sway)*0.12);
+    }
   }
 
   _camDir.subVectors(focus, camPos);
@@ -357,16 +458,13 @@ export function updateTrees(dt: number, time: number, camPos: THREE.Vector3, foc
  * Overnight the trees set again. A pruned tree, opened to the light, brings
  * back most of what came off it; an unpruned one only some.
  */
-export function regrowOvernight(){
+export function regrowOvernight(boost = 0){
   let back = 0;
   for(const a of apples){
     if(!a.picked || a.anim) continue;
-    const chance = treeData(a.treeGroup).pruned ? 0.75 : 0.30;
+    const chance = Math.min(0.96, (treeData(a.treeGroup).pruned ? 0.75 : 0.30) + boost);
     if(Math.random() > chance) continue;
-    a.picked = false;
-    a.group.visible = true;
-    a.group.scale.setScalar(APPLE_SCALE);
-    a.group.position.copy(a.home);
+    reset(a);
     back++;
   }
   return back;
@@ -374,12 +472,21 @@ export function regrowOvernight(){
 
 /** put every picked apple back on the branch */
 export function regrowAll(){
+  dropped = 0;
   for(const a of apples){
     if(!a.picked) continue;
-    a.picked = false;
     a.anim = null;
-    a.group.visible = true;
-    a.group.scale.setScalar(APPLE_SCALE);
-    a.group.position.copy(a.home);
+    reset(a);
   }
+}
+
+/** one apple back on its spur, green again and on a fresh schedule */
+function reset(a: Apple){
+  a.picked = false;
+  a.group.visible = true;
+  a.group.quaternion.identity();
+  a.group.rotation.y = Math.random()*Math.PI*2;
+  a.group.position.copy(a.home);
+  setRipeSchedule(a);
+  a.group.scale.setScalar(APPLE_SCALE*ripeSize(a));
 }

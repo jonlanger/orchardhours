@@ -3,9 +3,11 @@
    season goes into, and the rack the tools hang on.
    ============================================================ */
 import * as THREE from 'three';
-import { APPLE_TYPES, TYPE_KEYS, CRATE_CAPACITY, BARN_W, BARN_D, BARN_ROT } from '../core/config';
+import { APPLE_TYPES, TYPE_KEYS, CRATE_CAPACITY, EXTRA_BAY_CAPACITY,
+         BARN_W, BARN_D, BARN_ROT } from '../core/config';
 import type { AppleType } from '../core/config';
-import { state, basketTotal } from '../core/save';
+import { state, save, basketTotal, built, storeCap } from '../core/save';
+import { on } from '../core/bus';
 import type { ToolId } from '../core/save';
 import { toonMat, addOutline, part, BOX, CYL, fadeGroup } from '../core/materials';
 import type { Fadeable } from '../core/materials';
@@ -22,7 +24,7 @@ import { addInteractable } from '../player/interact';
 import { carrying, putBack, take, setRackSpot, setBarrowHome, TOOLS, TOOL_ORDER } from '../player/tools';
 import { barrowHandy, barrowTotal } from '../player/picking';
 import { deposit, openBarn } from '../ui/overlays';
-import { toast } from '../ui/hud';
+import { toast, renderBasket } from '../ui/hud';
 
 const W = BARN_W, D = BARN_D;
 
@@ -104,10 +106,17 @@ const LOFT_Y = 2.65, LOFT_Z = -D/2 + 2.1, LOFT_D = 3.6;
 }
 
 /* ============================================================
-   The barrels — one per variety, along the left wall
+   The barrels.
+
+   One per variety along the west wall to begin with; the extension frames a
+   second row of four behind them and opens the silo beyond that, so a variety
+   fills its barrel, then its bay, then the silo. And by the rack there is a
+   compost barrel, which is where everything off the ground ends up.
    ============================================================ */
 interface Barrel {
   type: AppleType;
+  /** the slice of that variety's store this one stands for */
+  base: number; cap: number;
   group: THREE.Group;
   fruit: THREE.InstancedMesh;
   lid: THREE.Mesh;
@@ -116,37 +125,47 @@ interface Barrel {
 }
 const BARREL_R = 0.48, BARREL_H = 0.86, BARREL_FRUIT = 22;
 const barrels: Barrel[] = [];
+/** the four the extension adds — built now, hidden until the builders come */
+const extraCasks: THREE.Group[] = [];
 
-TYPE_KEYS.forEach((k, i) => {
-  const def = APPLE_TYPES[k];
-  const lx = -W/2 + 0.95, lz = -2.7 + i*1.55;
+/** staves, bulging at the waist the way a cooper makes them, and open on top */
+function buildCask(lx: number, lz: number, stave: THREE.MeshToonMaterial, head: THREE.Material){
   const g = new THREE.Group();
   g.position.set(lx, 0.14, lz);
   inside.add(g);
 
-  /* staves, bulging at the waist the way a cooper makes them, and open on top
-     so you can see the season pile up inside */
+  const staves = stave.clone();
+  staves.side = THREE.DoubleSide;
   const wall = new THREE.Mesh(
-    new THREE.CylinderGeometry(BARREL_R*0.86, BARREL_R*0.86, BARREL_H, 16, 1, true), OAK);
-  wall.material = OAK.clone();
-  (wall.material as THREE.MeshToonMaterial).side = THREE.DoubleSide;
+    new THREE.CylinderGeometry(BARREL_R*0.86, BARREL_R*0.86, BARREL_H, 16, 1, true), staves);
   wall.position.y = BARREL_H/2;
   wall.castShadow = wall.receiveShadow = true;
   g.add(wall);
   addOutline(wall, 1.04, 0x4a3626);
   const waist = new THREE.Mesh(
-    new THREE.CylinderGeometry(BARREL_R, BARREL_R, BARREL_H*0.42, 16, 1, true), wall.material);
+    new THREE.CylinderGeometry(BARREL_R, BARREL_R, BARREL_H*0.42, 16, 1, true), staves);
   waist.position.y = BARREL_H/2;
   g.add(waist);
-  part(CYL(BARREL_R*0.84, BARREL_R*0.84, 0.06, 16), OAK_DARK, 0, 0.05, 0, g);   // the head
+  part(CYL(BARREL_R*0.84, BARREL_R*0.84, 0.06, 16), head, 0, 0.05, 0, g);
   for(const y of [0.12, BARREL_H/2, BARREL_H - 0.12]){
     part(new THREE.TorusGeometry(BARREL_R*0.94, 0.028, 5, 20), IRON, 0, y, 0, g).rotation.x = Math.PI/2;
   }
-  /* a chalked board naming what goes in, with a line marking how full it is */
+  return g;
+}
+
+/** a chalked board naming what goes in, with a line marking how full it is */
+function labelBoard(g: THREE.Group, colour: number){
   part(BOX(0.34, 0.46, 0.02), TRIM, 0, BARREL_H*0.52, BARREL_R*0.94, g);
-  part(BOX(0.24, 0.045, 0.012), toonMat(def.color, true), 0, BARREL_H*0.52 + 0.16, BARREL_R*0.99, g);
-  const gauge = part(BOX(0.20, 1, 0.012), toonMat(def.color, true), 0, 0, BARREL_R*0.99, g);
+  part(BOX(0.24, 0.045, 0.012), toonMat(colour, true), 0, BARREL_H*0.52 + 0.16, BARREL_R*0.99, g);
+  const gauge = part(BOX(0.20, 1, 0.012), toonMat(colour, true), 0, 0, BARREL_R*0.99, g);
   gauge.scale.y = 0.001;
+  return gauge;
+}
+
+function fruitBarrel(k: AppleType, lx: number, lz: number, base: number, cap: number, extra: boolean){
+  const def = APPLE_TYPES[k];
+  const g = buildCask(lx, lz, OAK, OAK_DARK);
+  const gauge = labelBoard(g, def.color);
 
   /* what is in it: a cap of apples that climbs as the season fills */
   const fruit = new THREE.InstancedMesh(APPLE_GEO, appleMats[k], BARREL_FRUIT);
@@ -157,23 +176,32 @@ TYPE_KEYS.forEach((k, i) => {
   const lid = part(CYL(BARREL_R*0.80, BARREL_R*0.80, 0.05, 16), OAK_DARK, 0, BARREL_H - 0.02, 0, g);
 
   const w = barnToWorld(lx, lz);
-  addSolid({ kind:'circle', x:w.x, z:w.z, r:BARREL_R + 0.05, top:FLOOR_TOP + BARREL_H });
+  addSolid({ kind:'circle', x:w.x, z:w.z, r:BARREL_R + 0.05, top:FLOOR_TOP + BARREL_H,
+             on: extra ? () => built('extension') : undefined });
 
-  const b: Barrel = { type:k, group:g, fruit, lid, gauge };
-  barrels.push(b);
+  barrels.push({ type:k, base, cap, group:g, fruit, lid, gauge });
+  if(extra) extraCasks.push(g);
 
   addInteractable({
-    id:'barrel-'+k,
+    id:`barrel-${k}${extra ? '-bay' : ''}`,
     at: new THREE.Vector3(w.x, 0, w.z),
     range: 1.9,
     label: () => {
+      if(extra && !built('extension')) return null;
       const have = state.basket[k] + (barrowHandy() ? state.barrow!.load[k] : 0);
       if(!have) return null;
       const name = state.discovered[k] ? def.label : 'this variety';
+      if(state.stored[k] >= storeCap())
+        return `The ${name} barrel is full to the head`;
       return `Tip ${have} ${have === 1 ? 'apple' : 'apples'} of ${name} into the barrel`;
     },
-    use: () => { deposit(k, barrowHandy()); refreshBarrels(); },
+    use: () => { deposit(k, barrowHandy()); },
   });
+}
+
+TYPE_KEYS.forEach((k, i) => {
+  fruitBarrel(k, -W/2 + 0.95, -2.7 + i*1.55, 0, CRATE_CAPACITY, false);
+  fruitBarrel(k, -W/2 + 2.05, -2.7 + i*1.55, CRATE_CAPACITY, EXTRA_BAY_CAPACITY, true);
 });
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(0.125,0.125,0.125);
@@ -181,8 +209,9 @@ const _p = new THREE.Vector3();
 
 export function refreshBarrels(){
   for(const b of barrels){
-    const frac = Math.min(1, state.stored[b.type]/CRATE_CAPACITY);
-    const n = state.stored[b.type] === 0 ? 0 : Math.max(1, Math.round(frac*BARREL_FRUIT));
+    const have = Math.max(0, Math.min(b.cap, state.stored[b.type] - b.base));
+    const frac = have/b.cap;
+    const n = have === 0 ? 0 : Math.max(1, Math.round(frac*BARREL_FRUIT));
     b.fruit.count = n;
     /* the heap sits on a rising floor inside the barrel */
     const surface = 0.26 + frac*(BARREL_H - 0.34);
@@ -201,8 +230,75 @@ export function refreshBarrels(){
     b.gauge.scale.y = h;
     b.gauge.position.y = BARREL_H*0.52 - 0.20 + h/2;
   }
+  for(const g of extraCasks) g.visible = built('extension');
+  refreshCompost();
 }
+
+/* ============================================================
+   The compost barrel, by the tool rack — where the windfalls go
+   ============================================================ */
+const COMPOST_FULL = 60;
+const compostHeap = (() => {
+  const g = buildCask(2.55, 2.75, OAK_DARK, OAK_DARK);
+  const gauge = labelBoard(g, 0x6E5238);
+  const heap = part(CYL(BARREL_R*0.80, BARREL_R*0.80, 0.10, 14), toonMat(0x6B4A2C, true),
+                    0, 0.30, 0, g);
+  heap.visible = false;
+  /* a few peelings on top, so it reads as fruit rather than earth */
+  const peel: THREE.Mesh[] = [];
+  for(let i=0;i<5;i++){
+    const a = (i/5)*Math.PI*2;
+    const m = part(APPLE_GEO, toonMat(0x8E6B3A, true),
+      Math.cos(a)*0.20, 0.34, Math.sin(a)*0.20, g);
+    m.scale.set(0.10, 0.055, 0.10);
+    m.visible = false;
+    peel.push(m);
+  }
+  const lid = part(CYL(BARREL_R*0.80, BARREL_R*0.80, 0.05, 16), OAK_DARK, 0, BARREL_H - 0.02, 0, g);
+  lid.rotation.z = 0.10;
+  lid.position.x = 0.10;                       // ajar, and leaning
+
+  const w = barnToWorld(2.55, 2.75);
+  addSolid({ kind:'circle', x:w.x, z:w.z, r:BARREL_R + 0.05, top:FLOOR_TOP + BARREL_H });
+
+  addInteractable({
+    id:'compost',
+    at: new THREE.Vector3(w.x, 0, w.z),
+    range: 1.9,
+    label: () => state.bruised
+      ? `Tip ${state.bruised} ${state.bruised === 1 ? 'windfall' : 'windfalls'} into the compost`
+      : (state.composting ? `${state.composting} rotting down — it goes on the rows in the morning` : null),
+    use: () => {
+      if(!state.bruised) return;
+      const n = state.bruised;
+      state.composting += n;
+      state.bruised = 0;
+      renderBasket(); save();
+      refreshCompost();
+      toast(`${n} ${n === 1 ? 'windfall' : 'windfalls'} into the compost. It goes back on the rows overnight, and the trees set the better for it.`);
+    },
+  });
+
+  return { heap, peel, gauge, lid };
+})();
+
+function refreshCompost(){
+  const frac = Math.min(1, state.composting/COMPOST_FULL);
+  compostHeap.heap.visible = state.composting > 0;
+  compostHeap.heap.position.y = 0.24 + frac*(BARREL_H - 0.42);
+  compostHeap.peel.forEach((m, i) => {
+    m.visible = state.composting > i*8;
+    m.position.y = compostHeap.heap.position.y + 0.05;
+  });
+  compostHeap.lid.visible = state.composting === 0;
+  const h = Math.max(0.004, frac*0.26);
+  compostHeap.gauge.scale.y = h;
+  compostHeap.gauge.position.y = BARREL_H*0.52 - 0.20 + h/2;
+}
+
 refreshBarrels();
+on('store:changed', refreshBarrels);
+on('upgrade:built', refreshBarrels);
 
 /* ---- the sorting table in the middle: tip everything at once ---- */
 {
@@ -229,7 +325,7 @@ refreshBarrels();
       const n = basketTotal() + (barrowHandy() ? barrowTotal() : 0);
       return n ? `Sort all ${n} into the barrels` : null;
     },
-    use: () => { deposit(null, barrowHandy()); refreshBarrels(); },
+    use: () => { deposit(null, barrowHandy()); },
   });
 }
 

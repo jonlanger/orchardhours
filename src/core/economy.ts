@@ -5,10 +5,11 @@
    world has to do about a delivery goes out on the bus, which is what keeps
    this module importable from anywhere.
    ============================================================ */
-import { APPLE_PRICE, GOODS, MACHINES, PLOTS, TYPE_KEYS,
-         SAPLING_PRICE, TOO_GOOD_TO_PRESS, applyPlots } from './config';
-import type { AppleType, GoodId, MachineId, PlotId } from './config';
-import { state, save, storedTotal } from './save';
+import { APPLE_PRICE, GOODS, MACHINES, PLOTS, UPGRADES, TYPE_KEYS,
+         SAPLING_PRICE, TOO_GOOD_TO_PRESS, COMPOST_BOOST, COMPOST_MAX_BOOST,
+         applyPlots } from './config';
+import type { AppleType, GoodId, MachineId, PlotId, UpgradeId } from './config';
+import { state, save, storedTotal, built } from './save';
 import { emit } from './bus';
 import { toast, renderPurse } from '../ui/hud';
 
@@ -37,6 +38,7 @@ export function sellApples(type: AppleType, want: number){
   const paid = n * APPLE_PRICE[type];
   state.stored[type] -= n;
   earn(paid);
+  emit('store:changed');
   save();
   return paid;
 }
@@ -65,21 +67,37 @@ const onOrder = (kind: string, id: string) =>
 
 export const machineOwned = (id: MachineId) => state.machines.includes(id);
 export const plotOwned    = (id: PlotId) => state.plots.includes(id);
+export const upgradeOwned = (id: UpgradeId) => built(id);
 export const machinePending = (id: MachineId) => onOrder('machine', id);
 export const plotPending    = (id: PlotId) => onOrder('plot', id);
+export const upgradePending = (id: UpgradeId) => onOrder('upgrade', id);
+
+/** what is still to be saved up before a price is within reach */
+export const shortBy = (cost: number) => Math.max(0, cost - state.purse);
+const cannotAfford = (cost: number) => `${money(shortBy(cost))} short of it yet.`;
 
 /** why this cannot be ordered just now, or null when it can */
 export function whyNotMachine(id: MachineId){
   if(machineOwned(id)) return 'Already in the barn.';
   if(machinePending(id)) return 'Already in the post.';
-  if(!canAfford(MACHINES[id].price)) return 'Not enough in the purse.';
+  if(!canAfford(MACHINES[id].price)) return cannotAfford(MACHINES[id].price);
   return null;
 }
 export function whyNotPlot(id: PlotId){
   if(plotOwned(id)) return 'Already yours.';
   if(plotPending(id)) return 'The deed is in the post.';
-  if(!canAfford(PLOTS[id].price)) return 'Not enough in the purse.';
+  if(!canAfford(PLOTS[id].price)) return cannotAfford(PLOTS[id].price);
   return null;
+}
+export function whyNotUpgrade(id: UpgradeId){
+  if(upgradeOwned(id)) return 'Already standing.';
+  if(upgradePending(id)) return 'The builders are booked for the morning.';
+  if(!canAfford(UPGRADES[id].price)) return cannotAfford(UPGRADES[id].price);
+  return null;
+}
+export function whyNotSaplings(qty: number){
+  const cost = SAPLING_PRICE * qty;
+  return canAfford(cost) ? null : cannotAfford(cost);
 }
 
 export function orderMachine(id: MachineId){
@@ -103,6 +121,15 @@ export function orderSaplings(qty: number){
   return true;
 }
 
+export function orderUpgrade(id: UpgradeId){
+  if(whyNotUpgrade(id)) return false;
+  take(UPGRADES[id].price);
+  state.post.push({ kind:'upgrade', id, qty:1, due: state.day + 1 });
+  save();
+  toast(`Ordered: the ${UPGRADES[id].label.toLowerCase()}. The builders come in the morning.`);
+  return true;
+}
+
 export function orderPlot(id: PlotId){
   if(whyNotPlot(id)) return false;
   take(PLOTS[id].price);
@@ -110,6 +137,22 @@ export function orderPlot(id: PlotId){
   save();
   toast(`Ordered: ${PLOTS[id].label}. The deed follows in the morning.`);
   return true;
+}
+
+/* ============================================================
+   The compost heap — what the windfalls are for
+   ============================================================ */
+/**
+ * Everything in the barrel goes back out onto the rows overnight. Returns the
+ * extra chance it buys each tree of setting again by morning.
+ */
+export function spreadCompost(){
+  const n = state.composting;
+  if(n <= 0) return 0;
+  state.composting = 0;
+  state.composted += n;
+  save();
+  return Math.min(COMPOST_MAX_BOOST, n * COMPOST_BOOST);
 }
 
 /* ============================================================
@@ -147,6 +190,7 @@ export function loadMachine(id: MachineId){
     if(!left) break;
   }
   state.batches.push({ machine:id, good:def.good, due: state.day + 1 });
+  emit('store:changed');
   save();
   toast(`${def.takes} apples into the ${def.label}. It will be ready in the morning.`);
   return true;
@@ -169,6 +213,11 @@ export function overnight(day: number){
     } else if(o.kind === 'sapling'){
       state.saplings += o.qty;
       said.push(o.qty === 1 ? 'a sapling is by the door' : `${o.qty} saplings are by the door`);
+    } else if(o.kind === 'upgrade'){
+      const id = o.id as UpgradeId;
+      if(!state.upgrades.includes(id)) state.upgrades.push(id);
+      emit('upgrade:built', { id });
+      said.push(`the ${UPGRADES[id].label.toLowerCase()} is up`);
     } else {
       const id = o.id as PlotId;
       if(!state.plots.includes(id)) state.plots.push(id);
@@ -186,6 +235,7 @@ export function overnight(day: number){
   }
 
   if(said.length) toast(`The post has come — ${said.join(', ')}.`);
+  emit('store:changed');
   renderPurse();
   void storedTotal;
 }

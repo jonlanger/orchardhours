@@ -2,12 +2,12 @@
    Fence, meadow detail, hills, clouds, petals
    ============================================================ */
 import * as THREE from 'three';
-import { bounds, TYPE_KEYS, APPLE_TYPES, BARN_X, BARN_Z } from '../core/config';
+import { bounds, BARN_X, BARN_Z } from '../core/config';
 import { scene } from '../core/renderer';
 import { toonMat, BOX } from '../core/materials';
 import { state } from '../core/save';
 import { groundHeightAt } from './ground';
-import { APPLE_GEO, CANOPY_GEOS, toonSoft } from './geometry';
+import { CANOPY_GEOS, toonSoft } from './geometry';
 
 /* ---- the ring fence ---- */
 export const FENCE = new THREE.Group(); scene.add(FENCE);
@@ -90,21 +90,17 @@ export function grassPatch(x1: number, x2: number, z1: number, z2: number){
   scene.add(patch);
 }
 
-/* ---- windfall apples and small stones in the lanes ---- */
-for(let i=0;i<26;i++){
+/* ---- small stones in the lanes ----
+   The fruit that lies about down here used to be scenery, which meant the
+   orchard was littered with apples that looked gatherable and were not.
+   The windfalls are real now and player/antics.ts lays them out; this keeps
+   the stones. */
+for(let i=0;i<14;i++){
   const x = (Math.random()-0.5)*48, z = (Math.random()-0.5)*52 + 4;
   if(Math.hypot(x - BARN_X, z - BARN_Z) < 8) continue;
-  if(Math.random() < 0.55){
-    const t = TYPE_KEYS[Math.floor(Math.random()*3)]!;
-    const f = new THREE.Mesh(APPLE_GEO, toonMat(APPLE_TYPES[t].color, true));
-    f.position.set(x, groundHeightAt(x,z)+0.13, z);
-    f.rotation.set(Math.random()*3, Math.random()*3, 1.3);
-    f.scale.setScalar(0.15); f.castShadow = true; scene.add(f);
-  } else {
-    const s = new THREE.Mesh(CANOPY_GEOS[1]!, toonMat(0xA9A092, true));
-    s.position.set(x, groundHeightAt(x,z)+0.06, z);
-    s.scale.set(0.16,0.10,0.13); s.castShadow = true; scene.add(s);
-  }
+  const s = new THREE.Mesh(CANOPY_GEOS[1]!, toonMat(0xA9A092, true));
+  s.position.set(x, groundHeightAt(x,z)+0.06, z);
+  s.scale.set(0.16,0.10,0.13); s.castShadow = true; scene.add(s);
 }
 
 /* ---- distant hills, unlit-flat so they read as background ---- */

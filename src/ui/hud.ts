@@ -1,7 +1,7 @@
 /* ============================================================
    HUD — the basket panel, the toast, the one-line hint
    ============================================================ */
-import { APPLE_TYPES, TYPE_KEYS, BASKET_CAPACITY } from '../core/config';
+import { APPLE_TYPES, TYPE_KEYS, BASKET_CAPACITY, SACK_CAPACITY } from '../core/config';
 import { state, basketTotal } from '../core/save';
 
 export const $ = (id: string) => document.getElementById(id)!;
@@ -27,7 +27,12 @@ export function renderBasket(bumpKey?: string){
           stroke-dasharray="${RING_C}" stroke-dashoffset="${RING_C*(1-frac)}"/>
       </svg>
       <div><b>Basket</b><span>${n} of ${BASKET_CAPACITY}</span></div>
-    </div><div class="rows">${rows}</div>`;
+    </div><div class="rows">${rows}${state.bruised ? `
+      <div class="basket-row windfall" title="Bruised — for the compost barrel, not the barrels">
+        <span class="dot" style="background:#8A6A3C"></span>
+        <span>Windfalls</span>
+        <span class="count">${state.bruised}${state.bruised >= SACK_CAPACITY ? ' · full' : ''}</span>
+      </div>` : ''}</div>`;
 }
 
 /* ---- the purse ---- */

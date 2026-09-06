@@ -3,14 +3,16 @@
    eating one of its own apples, and hurling one down the alley.
    ============================================================ */
 import * as THREE from 'three';
-import { TYPE_KEYS, BASKET_CAPACITY, VIG_APPLE, VIG_SIT, VIG_THROW, THROW_SPEED,
-         bounds } from '../core/config';
+import { TYPE_KEYS, SACK_CAPACITY, VIG_APPLE, VIG_SIT, VIG_THROW,
+         THROW_SPEED, BARN_X, BARN_Z, bounds } from '../core/config';
 import type { AppleType } from '../core/config';
-import { state, save, basketTotal } from '../core/save';
+import { state, save } from '../core/save';
+import { on } from '../core/bus';
 import { pressed } from '../core/input';
 import { scene } from '../core/renderer';
 import { buildApple, APPLE_SCALE } from '../world/geometry';
 import { groundHeightAt } from '../world/ground';
+import { blocked } from '../world/collision';
 import { character, rig } from './rig';
 import { addInteractable } from './interact';
 import { drain, refill, vigour, tirednessNote } from './vigour';
@@ -31,7 +33,8 @@ export const antics = {
 
 type Act =
   | { kind:'eat'; t:number; phase:'take'|'bite'|'after'; bites:number; apple:THREE.Group; type:AppleType }
-  | { kind:'throw'; t:number; phase:'wind'|'release'|'after'; apple:THREE.Group|null; type:AppleType };
+  | { kind:'throw'; t:number; phase:'wind'|'release'|'after'; apple:THREE.Group|null; type:AppleType }
+  | { kind:'gather'; t:number; phase:'stoop'|'rise'; apple:THREE.Group; from:THREE.Vector3 };
 
 let act: Act | null = null;
 
@@ -112,14 +115,20 @@ export function hurl(){
   antics.busy = true;
 }
 
-/* ---- apples loose on the grass ---- */
+/* ============================================================
+   Apples loose on the grass.
+
+   Everything down here is a windfall: thrown, or fallen off a branch it hung
+   on too long. Either way it has taken a knock, so it never goes back in the
+   basket — it goes into the sack, and from there into the compost barrel.
+   ============================================================ */
 interface Fall {
   g: THREE.Group; type: AppleType;
   v: THREE.Vector3; spin: THREE.Vector3;
   rest: boolean;
 }
 const falls: Fall[] = [];
-const MAX_FALLS = 14;
+const MAX_FALLS = 40;
 const GRAV = 17;
 
 const _wp = new THREE.Vector3(), _mp = new THREE.Vector3();
@@ -136,11 +145,56 @@ function release(type: AppleType, from: THREE.Vector3){
     spin: new THREE.Vector3(6 + Math.random()*5, Math.random()*4, 3 + Math.random()*4),
   };
   falls.push(f);
+  trimFalls();
+}
+
+/** the oldest go back into the grass, so the row never fills up with fruit */
+function trimFalls(){
   while(falls.length > MAX_FALLS){
     const old = falls.shift()!;
     scene.remove(old.g);
+    if(old === handy) handy = null;
   }
 }
+
+/* ---- what is already lying in the lanes when the season opens ----
+   Fruit went over long before the bear got here. These are real windfalls,
+   not scenery: gather them, and the compost barrel has something in it on
+   the first morning. */
+{
+  for(let i=0;i<16;i++){
+    const x = (Math.random()-0.5)*48, z = (Math.random()-0.5)*52 + 4;
+    if(Math.hypot(x - BARN_X, z - BARN_Z) < 8) continue;
+    /* not inside a trunk or a fence post — the bear has to be able to reach it */
+    if(blocked(x, z, groundHeightAt(x, z), 0.5)) continue;
+    const type = TYPE_KEYS[Math.floor(Math.random()*3)]!;
+    const g = buildApple(type);
+    g.position.set(x, groundHeightAt(x, z) + APPLE_SCALE*0.72, z);
+    g.rotation.set(Math.random()*3, Math.random()*3, 1.3);
+    scene.add(g);
+    falls.push({ g, type, rest:true, v:new THREE.Vector3(), spin:new THREE.Vector3() });
+  }
+}
+
+/* ---- an apple that hung on past its best, letting go of the spur ---- */
+let saidWhyFallen = false;
+
+on('apple:fell', ({ type, at }) => {
+  const g = buildApple(type);
+  g.position.copy(at);
+  scene.add(g);
+  falls.push({
+    g, type, rest:false,
+    v: new THREE.Vector3((Math.random()-0.5)*0.7, 0, (Math.random()-0.5)*0.7),
+    spin: new THREE.Vector3(2 + Math.random()*3, Math.random()*3, 2 + Math.random()*3),
+  });
+  trimFalls();
+
+  if(!saidWhyFallen){
+    saidWhyFallen = true;
+    toast('One went over — it hung on past its best. Anything off the ground is bruised.');
+  }
+});
 
 function updateFalls(dt: number){
   for(const f of falls){
@@ -171,6 +225,13 @@ function updateFalls(dt: number){
   }
 }
 
+/* ============================================================
+   Gathering one up.
+
+   Two ways in, exactly like the fruit on the trees: press E next to one, or
+   tap it and let the bear walk over. Both land here.
+   ============================================================ */
+
 /** the nearest apple lying in the grass, for the pick-it-up prompt */
 let handy: Fall | null = null;
 const _at = new THREE.Vector3();
@@ -179,31 +240,109 @@ function gatherPoint(){
   return handy ? _at.copy(handy.g.position) : character.position;
 }
 
+/** every windfall lying about, so a tap can be tested against them */
+export const windfallGroups = () => falls.map(f => f.g);
+
+/** which windfall a tapped mesh belongs to, if any */
+export function windfallOwner(obj: THREE.Object3D | null): Fall | null {
+  let o = obj;
+  while(o){
+    const f = falls.find(x => x.g === o);
+    if(f) return f;
+    o = o.parent;
+  }
+  return null;
+}
+
+/**
+ * The windfall nearest a point on the grass. An apple lying twenty metres off
+ * is a few pixels across, so a tap that lands on the ground beside one is
+ * taken to mean that one — otherwise the bear walks over and stands there
+ * looking at it, which is what everybody tries first.
+ */
+export function windfallNear(p: THREE.Vector3, within: number){
+  let best: Fall | null = null, bestD = within;
+  for(const f of falls){
+    const d = Math.hypot(f.g.position.x - p.x, f.g.position.z - p.z);
+    if(d < bestD){ bestD = d; best = f; }
+  }
+  return best;
+}
+
+/** where the bear puts its feet to stoop over one — beside it, not on it */
+export function windfallStand(f: Fall, out: THREE.Vector3){
+  const p = f.g.position;
+  const dx = character.position.x - p.x, dz = character.position.z - p.z;
+  const d = Math.hypot(dx, dz) || 1;
+  return out.set(p.x + dx/d*0.62, groundHeightAt(p.x, p.z), p.z + dz/d*0.62);
+}
+
+/** why one cannot be gathered just now, or null when it can */
+export function whyNotGather(){
+  if(state.bruised >= SACK_CAPACITY)
+    return 'The windfall sack is full. Tip it into the compost barrel in the barn.';
+  return null;
+}
+
+/** said once, in full, the first time a windfall is gathered */
+let saidWhatWindfallsAreFor = false;
+
+/** stoop, take it out of the grass, and drop it in the sack */
+export function gather(f: Fall){
+  if(act || picking()) return false;
+  const why = whyNotGather();
+  if(why){ toast(why); return false; }
+  const n = falls.indexOf(f);
+  if(n < 0) return false;
+
+  /* the fruit comes off the grass and into the paw; the Fall itself is done */
+  falls.splice(n, 1);
+  if(handy === f) handy = null;
+  scene.remove(f.g);
+
+  const apple = buildApple(f.type);
+  apple.position.copy(f.g.position);
+  apple.rotation.copy(f.g.rotation);
+  apple.scale.setScalar(APPLE_SCALE);
+  scene.add(apple);
+
+  /* square up to it before stooping */
+  character.rotation.y = Math.atan2(
+    f.g.position.x - character.position.x, f.g.position.z - character.position.z);
+
+  act = { kind:'gather', t:0, phase:'stoop', apple, from:f.g.position.clone() };
+  antics.busy = true;
+  return true;
+}
+
+/** the one under the bear's nose, for the E key and the touch button */
+export const handyWindfall = () => handy;
+
 addInteractable({
   id:'windfall',
   at: gatherPoint,
-  range: 1.5,
+  range: 1.8,
   anyAngle: true,
-  label: () => handy ? 'Pick it up out of the grass' : null,
-  use: () => {
-    const f = handy;
-    if(!f) return;
-    if(basketTotal() >= BASKET_CAPACITY){ toast('The basket will not hold another.'); return; }
-    state.basket[f.type]++;
-    scene.remove(f.g);
-    falls.splice(falls.indexOf(f), 1);
-    handy = null;
-    renderBasket(f.type);
-    updateBasketFruit();
-    save();
-  },
+  label: () => handy ? 'Gather the windfall' : null,
+  use: () => { if(handy) gather(handy); },
 });
+
+/** what to say once it is in the sack */
+function saidGathered(){
+  if(!saidWhatWindfallsAreFor){
+    saidWhatWindfallsAreFor = true;
+    toast('Bruised where it landed — the merchant will not take it and the barrels will not keep it. There is a compost barrel in the barn.');
+  } else {
+    toast(`Another for the compost — ${state.bruised} in the sack.`);
+  }
+}
 
 /* ============================================================
    The frame
    ============================================================ */
 const lerp = (a: number, b: number, p: number) => a + (b-a)*p;
 const ease = (p: number) => 1 - Math.pow(1-p, 3);
+const easeIO = (p: number) => p < 0.5 ? 4*p*p*p : 1 - Math.pow(-2*p+2, 3)/2;
 
 const BITES = 3;
 
@@ -225,7 +364,7 @@ export function updateAntics(dt: number){
 
   /* whichever loose apple is closest to hand */
   handy = null;
-  let bestD = 1.5;
+  let bestD = 1.8;
   for(const f of falls){
     if(!f.rest) continue;
     const d = Math.hypot(f.g.position.x - character.position.x, f.g.position.z - character.position.z);
@@ -234,6 +373,57 @@ export function updateAntics(dt: number){
 
   if(!act) return;
   act.t += dt;
+
+  /* ---- stooping for one in the grass ---- */
+  if(act.kind === 'gather'){
+    if(act.phase === 'stoop'){
+      /* down onto the haunches, paw out, and the apple comes up into it */
+      const p = Math.min(act.t/0.46, 1), e = easeIO(p);
+      rig.torso.rotation.x = lerp(0, 0.62, e);
+      rig.torso.position.y = lerp(0.52, 0.40, e);
+      rig.armR.rotation.x = lerp(-0.20, 0.86, e);
+      rig.armR.rotation.z = lerp(0, -0.14, e);
+      rig.armL.rotation.x = lerp(-0.30, 0.10, e);
+      rig.head.rotation.x = lerp(0, 0.44, e);
+      rig.legL.rotation.x = lerp(0, -0.26, e);
+      rig.legR.rotation.x = lerp(0, -0.18, e);
+      /* the last third of the reach lifts it off the ground into the paw */
+      const grab = Math.max(0, (p - 0.66)/0.34);
+      rig.handR.getWorldPosition(_wp);
+      act.apple.position.copy(act.from).lerp(_wp, ease(grab));
+      act.apple.rotation.z += dt*2.2;
+      if(p >= 1){ act.phase = 'rise'; act.t = 0; }
+    }
+    else {
+      /* up again, and it goes into the sack at the hip */
+      const p = Math.min(act.t/0.44, 1), e = easeIO(p);
+      rig.torso.rotation.x = lerp(0.62, 0, e);
+      rig.torso.position.y = lerp(0.40, 0.52, e);
+      rig.armR.rotation.x = lerp(0.86, -0.20, e);
+      rig.armR.rotation.z = lerp(-0.14, 0, e);
+      rig.armL.rotation.x = lerp(0.10, -0.30, e);
+      rig.head.rotation.x = lerp(0.44, 0, e);
+      rig.legL.rotation.x = lerp(-0.26, 0, e);
+      rig.legR.rotation.x = lerp(-0.18, 0, e);
+      rig.handR.getWorldPosition(_wp);
+      /* the sack rides low on the off side, behind the basket */
+      _mp.set(-0.24, 0.34, -0.10).applyEuler(character.rotation).add(character.position);
+      act.apple.position.copy(_wp).lerp(_mp, ease(p));
+      act.apple.scale.setScalar(APPLE_SCALE*(1 - 0.7*Math.max(0, (p - 0.5)/0.5)));
+      if(p >= 1){
+        scene.remove(act.apple);
+        state.bruised++;
+        renderBasket();
+        save();
+        saidGathered();
+        act = null;
+        antics.busy = false;
+        rig.torso.rotation.x = 0;
+        rig.torso.position.y = 0.52;
+      }
+    }
+    return;
+  }
 
   if(act.kind === 'eat'){
     if(act.phase === 'take'){
@@ -324,4 +514,9 @@ export function clearFalls(){
   for(const f of falls) scene.remove(f.g);
   falls.length = 0;
   handy = null;
+  saidWhyFallen = false;
+  saidWhatWindfallsAreFor = false;
 }
+
+/** how many are lying about out there, for the ledger */
+export const windfallsLying = () => falls.length;

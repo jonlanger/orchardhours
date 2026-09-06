@@ -86,6 +86,33 @@ export const CANOPY_BASE = 0x6FA24A;
 
 export const APPLE_SCALE = 0.19;
 
+/* ============================================================
+   The marks an apple wears at its best.
+
+   A ring of short dashes standing off the fruit, drawn in apple-local units
+   so they ride the group's own scale. Three shared materials, pulsed a little
+   out of step with each other, keep the whole crop to three draw states.
+   ============================================================ */
+const MARK_GEO = new THREE.BoxGeometry(0.125, 1, 0.05);
+MARK_GEO.translate(0, 0.5, 0);                       // grows outward from the origin
+
+export const MARK_MATS = [0,1,2].map(() => new THREE.MeshBasicMaterial({
+  color:0xFFEEB4, transparent:true, opacity:0.42, depthWrite:false }));
+
+/** eight dashes in the group's XY plane, so a lookAt is all the facing it needs */
+export function buildRipeMark(mat: THREE.Material){
+  const g = new THREE.Group();
+  for(let i=0;i<8;i++){
+    const a = (i/8)*Math.PI*2;
+    const m = new THREE.Mesh(MARK_GEO, mat);
+    m.position.set(Math.sin(a)*1.55, Math.cos(a)*1.55, 0);
+    m.rotation.z = -a;
+    m.scale.y = i % 2 ? 0.52 : 0.94;                 // long, short, long, short
+    g.add(m);
+  }
+  return g;
+}
+
 export function buildApple(type: AppleType){
   const g = new THREE.Group();
   const body = new THREE.Mesh(APPLE_GEO, appleMats[type]);

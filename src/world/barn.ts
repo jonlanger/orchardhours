@@ -21,6 +21,7 @@ export const BARN_RED_D = toonMat(0x862F22, true);
 export const TRIM       = toonMat(0xF2E4CB, true);
 export const ROOF_MAT   = toonMat(0x5A626B, true);
 export const STONE      = toonMat(0xBFB49B, true);
+export const HOOP       = toonMat(0xA79B84, true);
 export const BRASS      = new THREE.MeshStandardMaterial({ color:0xD9A441, roughness:0.35, metalness:0.6 });
 
 const W = BARN_W, H = BARN_H, D = BARN_D;
@@ -139,12 +140,8 @@ part(CYL(0.022,0.022,0.55,6), toonMat(0x3B3B43), 0, 1.62, 0, cup);
 part(BOX(0.34,0.20,0.02), toonMat(0x3B3B43), 0.10, 1.88, 0, cup);
 part(SPH, BRASS, 0, 1.92, 0, cup).scale.setScalar(0.05);
 
-/* silo */
-const silo = new THREE.Group(); silo.position.set(-W/2-2.2, 0, -2.2); barn.add(silo);
-const siloBody = part(CYL(1.5,1.55,7.2,20), STONE, 0, 3.6, 0, silo);
-siloBody.castShadow = siloBody.receiveShadow = true; addOutline(siloBody, 1.02);
-for(let i=1;i<7;i++) part(new THREE.TorusGeometry(1.53, 0.035, 5, 22), toonMat(0xA79B84), 0, i*1.0, 0, silo).rotation.x = Math.PI/2;
-part(new THREE.SphereGeometry(1.56, 20, 10, 0, Math.PI*2, 0, Math.PI/2), ROOF_MAT, 0, 7.2, 0, silo);
+/* the silo stands off the west wall; world/silo.ts builds it */
+export const SILO_LX = -W/2 - 2.2, SILO_LZ = -2.2;
 
 /* yard: crates + hay bales + sign */
 const CRATE_W = toonMat(0xB58347, true), CRATE_D = toonMat(0x94682F, true);
@@ -214,11 +211,6 @@ export function insideBarn(x: number, z: number){
   return Math.abs(lx) < W/2 && Math.abs(lz) < D/2;
 }
 
-/* the silo */
-{
-  const p = barnToWorld(-W/2-2.2, -2.2);
-  addSolid({ kind:'circle', x:p.x, z:p.z, r:1.75 });
-}
 /* hay bales — low enough to hop onto */
 for(const [hx,hz] of [[-3.2, D/2+1.8], [-4.0, D/2+2.9]] as const){
   const p = barnToWorld(hx, hz);

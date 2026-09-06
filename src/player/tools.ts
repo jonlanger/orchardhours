@@ -219,7 +219,7 @@ export const TOOLS: Record<ToolId, ToolDef> = {
   },
   barrow: {
     id:'barrow', label:'wheelbarrow', slot:3, socket:'front', pos:[0,-0.30,0.62], rot:[0,0,0],
-    note:'Sixty apples of overflow, so a good tree does not send you back to the barn halfway through.',
+    note:'Three basketfuls of overflow, so a good tree does not send you back to the barn halfway through. Loaded, it is slow going, and it will not fit between the trunks the way you do.',
     build: buildBarrow,
     icon:`<svg viewBox="0 0 24 24" fill="none"><path d="M4 8h10l3 6H7L4 8z" stroke="#B98A50" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 14l4 3" stroke="#8E6636" stroke-width="1.6" stroke-linecap="round"/><circle cx="9" cy="18" r="2.2" stroke="#59606B" stroke-width="1.6"/></svg>`,
   },

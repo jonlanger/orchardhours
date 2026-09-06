@@ -3,6 +3,7 @@
    each other, which is what keeps the module graph acyclic.
    ============================================================ */
 import type * as THREE from 'three';
+import type { AppleType } from './config';
 
 export interface Events {
   /* walk the bear somewhere; the controller listens */
@@ -17,6 +18,12 @@ export interface Events {
   'machine:installed': { id: string };
   /* a plot was bought; the fence and the plan follow the new bounds */
   'land:bought': { id: string };
+  /* something was built onto the farm — the barn extension and what follows */
+  'upgrade:built': { id: string };
+  /* an apple hung on past its best and let go; the grass catches it */
+  'apple:fell': { type: AppleType; at: THREE.Vector3 };
+  /* the barrels changed — what is drawn standing in them should follow */
+  'store:changed': void;
   /* the barn sheet should redraw itself where it stands */
   'barn:render': void;
   /* the desk was used; open the catalogue */

@@ -1,8 +1,9 @@
 /* ============================================================
    Game state, and the versioned save behind it
    ============================================================ */
-import type { AppleType, GoodId, MachineId, PlotId } from './config';
-import { TYPE_KEYS, GOOD_KEYS, MACHINE_KEYS, PLOT_KEYS, SAPLING_STAGES, applyPlots } from './config';
+import type { AppleType, GoodId, MachineId, PlotId, UpgradeId } from './config';
+import { TYPE_KEYS, GOOD_KEYS, MACHINE_KEYS, PLOT_KEYS, UPGRADE_KEYS, SAPLING_STAGES,
+         CRATE_CAPACITY, EXTRA_BAY_CAPACITY, SILO_CAPACITY, applyPlots } from './config';
 
 export type ToolId = 'picker' | 'ladder' | 'barrow' | 'shears' | 'lantern';
 
@@ -16,7 +17,7 @@ export interface Settings {
 }
 
 /** an order in the post, due on the morning of `due` */
-export interface Order { kind: 'machine' | 'sapling' | 'plot'; id: string; qty: number; due: number }
+export interface Order { kind: 'machine' | 'sapling' | 'plot' | 'upgrade'; id: string; qty: number; due: number }
 /** a machine loaded last thing, with the goods due in the morning */
 export interface Batch { machine: MachineId; good: GoodId; due: number }
 /** a whip in the ground, one stage nearer bearing every morning */
@@ -43,6 +44,12 @@ export interface State {
   /** where the barrow is parked, and what is in it */
   barrow: { x: number; z: number; ry: number; load: Record<AppleType, number> } | null;
   prunedTrees: number[];
+  /** windfalls in the sack — bruised, unsellable, and bound for the compost */
+  bruised: number;
+  /** what is rotting down in the compost barrel, waiting for the morning */
+  composting: number;
+  /** everything the heap has taken this season, for the ledger */
+  composted: number;
 
   /* ---- the catalogue ---- */
   /** shillings */
@@ -52,6 +59,8 @@ export interface State {
   goods: Record<GoodId, number>;
   machines: MachineId[];
   plots: PlotId[];
+  /** what has been built onto the farm — the barn extension and what follows */
+  upgrades: UpgradeId[];
   /** saplings delivered and waiting to go in the ground */
   saplings: number;
   post: Order[];
@@ -74,13 +83,15 @@ export const state: State = {
   ladder: null,
   barrow: null,
   prunedTrees: [],
+  bruised: 0, composting: 0, composted: 0,
   purse: 0, sold: 0,
   goods: zeroGoods(),
-  machines: [], plots: [], saplings: 0,
+  machines: [], plots: [], upgrades: [], saplings: 0,
   post: [], batches: [], growing: [], planted: [],
 };
 
-const SAVE_KEY = 'orchardhours.save.v4';
+const SAVE_KEY = 'orchardhours.save.v5';
+const SAVE_KEY_V4 = 'orchardhours.save.v4';
 const SAVE_KEY_V3 = 'orchardhours.save.v3';
 const SAVE_KEY_V2 = 'orchardhours.save.v2';
 
@@ -91,8 +102,10 @@ export function save(){
       deposited: state.deposited, vigour: state.vigour, day: state.day, settings: state.settings,
       carried: state.carried, equipped: state.equipped,
       ladder: state.ladder, barrow: state.barrow, prunedTrees: state.prunedTrees,
+      bruised: state.bruised, composting: state.composting, composted: state.composted,
       purse: state.purse, sold: state.sold, goods: state.goods,
-      machines: state.machines, plots: state.plots, saplings: state.saplings,
+      machines: state.machines, plots: state.plots, upgrades: state.upgrades,
+      saplings: state.saplings,
       post: state.post, batches: state.batches,
       growing: state.growing, planted: state.planted,
     }));
@@ -118,6 +131,7 @@ export function load(){
   try{
     /* newest first; an older season is read and carried forward */
     const raw = localStorage.getItem(SAVE_KEY)
+      ?? localStorage.getItem(SAVE_KEY_V4)
       ?? localStorage.getItem(SAVE_KEY_V3)
       ?? localStorage.getItem(SAVE_KEY_V2);
     if(!raw) return;
@@ -135,6 +149,9 @@ export function load(){
     if(d.ladder !== undefined) state.ladder = d.ladder;
     if(d.barrow !== undefined) state.barrow = d.barrow;
     if(Array.isArray(d.prunedTrees)) state.prunedTrees = d.prunedTrees;
+    state.bruised    = Math.max(0, Math.round(num(d.bruised, 0)));
+    state.composting = Math.max(0, Math.round(num(d.composting, 0)));
+    state.composted  = Math.max(0, Math.round(num(d.composted, 0)));
 
     /* ---- the catalogue, read defensively ----
        These are the only saved fields the world builds geometry from, so a
@@ -145,8 +162,10 @@ export function load(){
     state.saplings = Math.max(0, Math.round(num(d.saplings, 0)));
     state.machines = ids(d.machines, MACHINE_KEYS);
     state.plots    = ids(d.plots, PLOT_KEYS);
+    state.upgrades = ids(d.upgrades, UPGRADE_KEYS);
     state.post = list(d.post, 40, o => ({
-      kind: o.kind === 'machine' || o.kind === 'sapling' || o.kind === 'plot' ? o.kind : null,
+      kind: o.kind === 'machine' || o.kind === 'sapling' || o.kind === 'plot'
+            || o.kind === 'upgrade' ? o.kind : null,
       id: typeof o.id === 'string' ? o.id : null,
       qty: Math.max(1, Math.round(num(o.qty, 1))),
       due: Math.max(1, Math.round(num(o.due, 1))),
@@ -177,6 +196,7 @@ load();
 export function resetSeason(){
   try{
     localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem(SAVE_KEY_V4);
     localStorage.removeItem(SAVE_KEY_V3);
     localStorage.removeItem(SAVE_KEY_V2);
   }catch{ /* ignore */ }
@@ -185,12 +205,23 @@ export function resetSeason(){
   state.picked = 0; state.deposited = 0; state.day = 1; state.vigour = 1;
   state.carried = []; state.equipped = null;
   state.ladder = null; state.barrow = null; state.prunedTrees = [];
+  state.bruised = 0; state.composting = 0; state.composted = 0;
   state.purse = 0; state.sold = 0;
   state.goods = zeroGoods();
-  state.machines = []; state.plots = []; state.saplings = 0;
+  state.machines = []; state.plots = []; state.upgrades = []; state.saplings = 0;
   state.post = []; state.batches = []; state.growing = []; state.planted = [];
   applyPlots(state.plots);
 }
+
+/** whether a thing has been built onto the farm */
+export const built = (id: UpgradeId) => state.upgrades.includes(id);
+
+/**
+ * How much of one variety the farm can put away: a barrel to start with, and
+ * the four extra barrels plus the silo once the extension is up.
+ */
+export const storeCap = () =>
+  CRATE_CAPACITY + (built('extension') ? EXTRA_BAY_CAPACITY + SILO_CAPACITY : 0);
 
 export const basketTotal   = () => TYPE_KEYS.reduce((n,k)=> n + state.basket[k], 0);
 export const storedTotal   = () => TYPE_KEYS.reduce((n,k)=> n + state.stored[k], 0);
