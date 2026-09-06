@@ -13,8 +13,8 @@ import { state, basketTotal, built } from '../core/save';
 import { on } from '../core/bus';
 import { toonMat, addOutline, part, BOX, CYL } from '../core/materials';
 import { addSolid, addPlatform } from './collision';
-import { barn, barnToWorld, BARN_FLOOR_Y, SILO_LX, SILO_LZ,
-         STONE, HOOP, ROOF_MAT, TRIM } from './barn';
+import { barn, barnToWorld, BARN_FLOOR_Y, SILO_LX, SILO_LZ, DECK_Y, DECK_HALF_W,
+         BRIDGE_HALF, upOnTheRoof, STONE, HOOP, ROOF_MAT, TRIM, DECK_PLANK } from './barn';
 import { addInteractable } from '../player/interact';
 import { startClimb } from '../player/controller';
 import { character } from '../player/rig';
@@ -27,8 +27,17 @@ const DARK   = toonMat(0x2A2118);
 const IRON   = toonMat(0x59606B, true);
 
 const R = 1.5;                    // the shell
-const TOP = 7.2;                  // where the dome springs
-const DECK_X = -2.2, DECK_Y = 6.55;   // the hatch platform, out on the west side
+/**
+ * The silo is built to the barn's own roof deck, so the bridge between them
+ * is a level plank walk rather than a scramble. Its height is not a number
+ * chosen here; it is whatever the deck turned out to be.
+ */
+const ROOF_Y = DECK_Y;
+const TOP = ROOF_Y - 0.14;        // the shell, under the deck slab
+/** the caged ladder runs up the west face, hard against the shell */
+const LADDER_X = -(R + 0.12);
+/** and puts the bear down here, well inside the parapet */
+const STEP_X = -0.85;
 
 const silo = new THREE.Group();
 silo.position.set(SILO_LX, 0, SILO_LZ);
@@ -42,7 +51,42 @@ for(let i=1;i<7;i++){
   part(new THREE.TorusGeometry(R + 0.03, 0.035, 5, 22), HOOP, 0, i*1.0, 0, silo)
     .rotation.x = Math.PI/2;
 }
-part(new THREE.SphereGeometry(R + 0.06, 20, 10, 0, Math.PI*2, 0, Math.PI/2), ROOF_MAT, 0, TOP, 0, silo);
+/* ---- the roof: a flat deck you can stand on, with a parapet and a cap ---- */
+{
+  const deck = part(CYL(R + 0.10, R + 0.10, 0.14, 20), ROOF_MAT, 0, TOP + 0.07, 0, silo);
+  deck.castShadow = deck.receiveShadow = true;
+  addOutline(deck, 1.02);
+  /* A parapet round the edge — and it holds, rather than being a painted-on
+     promise: step off the top rung and a moment of held W would otherwise walk
+     the bear straight over the side. The posts are close enough together that
+     their collision circles overlap into a continuous ring. */
+  const RAIL_R = R + 0.06, POSTS = 10;
+  /* one post is missing, and the rail either side of it: that is the gate the
+     bridge from the barn comes in through */
+  const GATE = 0;
+  for(let i=0;i<POSTS;i++){
+    if(i === GATE) continue;
+    const a = (i/POSTS)*Math.PI*2;
+    part(BOX(0.05, 0.62, 0.05), IRON,
+      Math.cos(a)*RAIL_R, ROOF_Y + 0.31, Math.sin(a)*RAIL_R, silo);
+    const w = barnToWorld(SILO_LX + Math.cos(a)*RAIL_R, SILO_LZ + Math.sin(a)*RAIL_R);
+    addSolid({ kind:'circle', x:w.x, z:w.z, r:0.20 });
+  }
+  /* the rail runs post to post as short straight lengths, so the gate is a
+     real gap and not a hoop with a bear-sized hope in it */
+  for(let i=0;i<POSTS;i++){
+    if(i === GATE || (i + 1) % POSTS === GATE) continue;
+    const a0 = (i/POSTS)*Math.PI*2, a1 = ((i+1)/POSTS)*Math.PI*2;
+    const x0 = Math.cos(a0)*RAIL_R, z0 = Math.sin(a0)*RAIL_R;
+    const x1 = Math.cos(a1)*RAIL_R, z1 = Math.sin(a1)*RAIL_R;
+    const seg = part(BOX(0.035, 0.035, Math.hypot(x1-x0, z1-z0)), IRON,
+      (x0+x1)/2, ROOF_Y + 0.60, (z0+z1)/2, silo);
+    seg.rotation.y = Math.atan2(x1-x0, z1-z0);
+  }
+  /* the filling cap in the middle, small enough to walk round */
+  part(new THREE.SphereGeometry(0.52, 14, 8, 0, Math.PI*2, 0, Math.PI/2), ROOF_MAT, 0, ROOF_Y, 0, silo);
+  part(new THREE.TorusGeometry(0.52, 0.03, 5, 14), HOOP, 0, ROOF_Y + 0.02, 0, silo).rotation.x = Math.PI/2;
+}
 
 /* ---- the chute door, facing out into the yard ---- */
 {
@@ -67,41 +111,76 @@ levelBoard.rotation.y = -0.62;
 const gauge = part(BOX(0.30, 1, 0.02), toonMat(0xB4713C, true), 0, 0, 0.03, levelBoard);
 gauge.scale.y = 0.001;
 
-/* ---- the caged ladder up the west side, and the hatch platform ---- */
+/* ---- the caged ladder, ground to roof ---- */
 {
   for(const sz of [-1, 1]){
-    part(BOX(0.06, DECK_Y + 0.25, 0.06), IRON, DECK_X, (DECK_Y + 0.25)/2, sz*0.24, silo);
+    part(BOX(0.06, ROOF_Y + 0.55, 0.06), IRON, LADDER_X, (ROOF_Y + 0.55)/2, sz*0.24, silo);
   }
-  for(let y = 0.34; y < DECK_Y; y += 0.34){
-    part(BOX(0.06, 0.05, 0.48), IRON, DECK_X, y, 0, silo);
+  for(let y = 0.34; y < ROOF_Y + 0.4; y += 0.34){
+    part(BOX(0.06, 0.05, 0.48), IRON, LADDER_X, y, 0, silo);
   }
-  /* brackets back to the shell, so it does not read as floating */
-  for(const y of [1.6, 3.6, 5.6]) part(BOX(0.72, 0.06, 0.06), IRON, DECK_X + 0.36, y, 0, silo);
+  /* the hoops of the safety cage, from head height up */
+  for(let y = 2.0; y < ROOF_Y - 0.2; y += 0.7){
+    const hoop = part(new THREE.TorusGeometry(0.34, 0.022, 4, 12, Math.PI), IRON, LADDER_X - 0.06, y, 0, silo);
+    hoop.rotation.set(Math.PI/2, 0, 0);
+    hoop.rotation.y = Math.PI/2;
+  }
+}
 
-  const deck = part(BOX(1.30, 0.12, 1.30), BOARD, DECK_X, DECK_Y, 0, silo);
-  deck.castShadow = deck.receiveShadow = true;
-  addOutline(deck, 1.03, 0x4a3626);
-  for(const [ox, oz] of [[-0.62, 0], [0, -0.62], [0, 0.62]] as const){
-    part(BOX(0.06, 0.72, 0.06), IRON, DECK_X + ox, DECK_Y + 0.42, oz, silo);
-    part(BOX(ox ? 0.06 : 1.30, 0.06, ox ? 1.30 : 0.06), IRON, DECK_X + ox, DECK_Y + 0.76, oz, silo);
+/* ============================================================
+   The bridge across to the barn.
+
+   Level, because the silo was built to the barn's deck rather than to a
+   height of its own — so this is a plank walk between two floors at the same
+   height, not a climb. It leaves the deck through the gap in the west railing
+   and comes in at the silo's one missing parapet post.
+   ============================================================ */
+{
+  const BX1 = SILO_LX + R + 0.05, BX0 = -DECK_HALF_W - 0.10;
+  const cx = (BX0 + BX1)/2, len = BX0 - BX1, z = SILO_LZ;
+
+  const walk = part(BOX(len, 0.10, BRIDGE_HALF*2 - 0.06), DECK_PLANK, cx, DECK_Y - 0.05, z, barn);
+  walk.castShadow = walk.receiveShadow = true;
+  addOutline(walk, 1.01, 0x4a3626);
+  for(let x = BX1 + 0.32; x < BX0 - 0.2; x += 0.48){
+    part(BOX(0.07, 0.05, BRIDGE_HALF*2 - 0.12), BOARD, x, DECK_Y + 0.02, z, barn);
   }
+  /* two beams under it, so it is carried and not floating */
+  for(const sz of [-1, 1]){
+    part(BOX(len, 0.14, 0.10), BOARD, cx, DECK_Y - 0.16, z + sz*(BRIDGE_HALF - 0.10), barn);
+  }
+  /* and rails that hold, seven metres up over the yard */
+  for(const sz of [-1, 1]){
+    const rz = z + sz*BRIDGE_HALF;
+    for(const y of [0.88, 0.48]){
+      part(BOX(len, 0.06, 0.06), BOARD, cx, DECK_Y + y, rz, barn);
+    }
+    for(let i=0;i<=4;i++){
+      part(BOX(0.08, 0.94, 0.08), BOARD, BX1 + len*(i/4), DECK_Y + 0.47, rz, barn);
+    }
+    const r = barnToWorld(cx, rz);
+    addSolid({ kind:'box', x:r.x, z:r.z, hw:len/2, hd:0.09, ry:BARN_ROT, on:upOnTheRoof });
+  }
+  const w = barnToWorld(cx, z);
+  addPlatform({ x:w.x, z:w.z, ry:BARN_ROT,
+                hw:len/2, hd:BRIDGE_HALF - 0.06, top:BARN_FLOOR_Y + DECK_Y });
 }
 
 /* ============================================================
    What it blocks, what it holds you up on, and where you stand
    ============================================================ */
+/* The shell blocks the yard, and its own roof is the top of it: give the solid
+   a lid and the deck needs no platform of its own — a bear at that height is
+   standing on the silo rather than being shoved out of it. */
 const wallAt = barnToWorld(SILO_LX, SILO_LZ);
-addSolid({ kind:'circle', x:wallAt.x, z:wallAt.z, r:R + 0.15 });
-
-const deckAt = barnToWorld(SILO_LX + DECK_X, SILO_LZ);
-addPlatform({ x:deckAt.x, z:deckAt.z, ry:BARN_ROT, hw:0.65, hd:0.65,
-              top:BARN_FLOOR_Y + DECK_Y + 0.06 });
+addSolid({ kind:'circle', x:wallAt.x, z:wallAt.z, r:R + 0.15, top:BARN_FLOOR_Y + ROOF_Y });
 
 /** facing the silo from the ladder: the barn's own +x, turned into the world */
 const FACE_IN = Math.atan2(Math.cos(BARN_ROT), -Math.sin(BARN_ROT));
 
 const doorAt = barnToWorld(SILO_LX, SILO_LZ + R + 1.0);
-const footAt = barnToWorld(SILO_LX + DECK_X, SILO_LZ);
+const footAt = barnToWorld(SILO_LX + LADDER_X, SILO_LZ);
+const roofAt = barnToWorld(SILO_LX + STEP_X, SILO_LZ);
 
 /* ============================================================
    Using it
@@ -133,6 +212,8 @@ addInteractable({
   at: new THREE.Vector3(doorAt.x, 0, doorAt.z),
   range: 2.0,
   label: () => {
+    /* the door is at the foot of it; a bear on the roof is not at the door */
+    if(character.position.y > BARN_FLOOR_Y + 2.0) return null;
     if(!built('extension')) return 'Try the silo door';
     const n = toHand();
     return n ? `Tip all ${n} down the silo chute` : `The silo — ${siloHolds()} apples in it`;
@@ -150,9 +231,11 @@ addInteractable({
 addInteractable({
   id:'silo-ladder',
   at: new THREE.Vector3(footAt.x, 0, footAt.z),
-  range: 1.5,
+  range: 1.6,
   anyAngle: true,
-  label: () => character.position.y < BARN_FLOOR_Y + 2.0 ? 'Climb the silo ladder' : null,
+  label: () => character.position.y < BARN_FLOOR_Y + 2.0 ? 'Climb up onto the silo' : null,
+  /* up the rungs on the outside, then off onto the deck at the top */
   use: () => startClimb(footAt.x, footAt.z, BARN_FLOOR_Y,
-                        BARN_FLOOR_Y + DECK_Y + 0.06, FACE_IN),
+                        BARN_FLOOR_Y + ROOF_Y + 0.22, FACE_IN,
+                        roofAt.x, roofAt.z),
 });

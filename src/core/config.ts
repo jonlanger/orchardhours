@@ -77,7 +77,7 @@ export const FX1 = -32, FX2 = 32, FZ1 = -47, FZ2 = 40;
 
 /* barn footprint, at the head of the rows facing back down them */
 export const BARN_X = -5, BARN_Z = -34, BARN_ROT = 0.20;
-export const BARN_W = 8.4, BARN_H = 4.2, BARN_D = 11;
+export const BARN_W = 11.0, BARN_H = 4.6, BARN_D = 14.0;
 
 export const DAY_LENGTH = 420;
 

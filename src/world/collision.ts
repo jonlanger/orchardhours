@@ -12,8 +12,12 @@ export interface Solid {
   r?: number; hw?: number; hd?: number; ry?: number;
   /** the height of the walkable surface on top, if there is one */
   top?: number;
-  /** the floor it stands on — you are only blocked while below its top */
-  base?: number;
+  /**
+   * How high it reaches. A wall stops being a wall once you are above it: the
+   * roof deck and the bridge over to the silo both pass clean over the barn's
+   * own walls, and without this they would run into them seven metres up.
+   */
+  ceiling?: number;
   /** turned off while, say, a barn door is open */
   on?: () => boolean;
 }
@@ -30,9 +34,18 @@ export function addPlatform(p: Platform){ platforms.push(p); return p; }
 export const STEP_UP = 0.42;
 
 const _l = new THREE.Vector2();
+/**
+ * A world point in a rotated box's own frame.
+ *
+ * `ry` is the mesh's `rotation.y`, which three.js applies as
+ * `world = (lx·cos + lz·sin, −lx·sin + lz·cos)`. Undoing that means rotating
+ * by +ry, not −ry: the two are only the same when ry is zero, and getting it
+ * backwards leans every rotated box twice its own angle off the shape it is
+ * supposed to be standing in for.
+ */
 function toLocal(x: number, z: number, s: { x:number; z:number; ry?: number }){
   const dx = x - s.x, dz = z - s.z;
-  const a = -(s.ry ?? 0);
+  const a = s.ry ?? 0;
   _l.set(dx*Math.cos(a) - dz*Math.sin(a), dx*Math.sin(a) + dz*Math.cos(a));
   return _l;
 }
@@ -74,7 +87,7 @@ export function resolve(p: THREE.Vector3, radius: number){
       if(s.on && !s.on()) continue;
       /* standing on top of it, or clear above it? then it is floor, not wall */
       if(s.top !== undefined && p.y >= s.top - 0.08) continue;
-      if(s.base !== undefined && p.y > s.base + 4.5) continue;
+      if(s.ceiling !== undefined && p.y >= s.ceiling) continue;
 
       if(s.kind === 'circle'){
         const dx = p.x - s.x, dz = p.z - s.z;
@@ -92,7 +105,8 @@ export function resolve(p: THREE.Vector3, radius: number){
           const px = hw - Math.abs(l.x), pz = hd - Math.abs(l.y);
           if(px < pz) l.x = Math.sign(l.x || 1) * hw;
           else        l.y = Math.sign(l.y || 1) * hd;
-          const a = s.ry ?? 0;
+          /* and back out again — the inverse of toLocal, so -ry here */
+          const a = -(s.ry ?? 0);
           p.x = s.x + l.x*Math.cos(a) - l.y*Math.sin(a);
           p.z = s.z + l.x*Math.sin(a) + l.y*Math.cos(a);
         }
@@ -109,6 +123,7 @@ export function blocked(x: number, z: number, y: number, radius = 0){
   for(const s of solids){
     if(s.on && !s.on()) continue;
     if(s.top !== undefined && y >= s.top - 0.08) continue;
+    if(s.ceiling !== undefined && y >= s.ceiling) continue;
     if(s.kind === 'circle'){
       if(Math.hypot(x - s.x, z - s.z) < s.r! + radius) return true;
     } else if(inBox(x, z, { x:s.x, z:s.z, ry:s.ry, hw:s.hw!, hd:s.hd! }, radius)) return true;

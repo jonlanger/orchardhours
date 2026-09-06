@@ -14,7 +14,7 @@ import { state } from '../core/save';
 import { on } from '../core/bus';
 import { toonMat, addOutline, part, BOX, CYL, SPH } from '../core/materials';
 import { addSolid } from './collision';
-import { barn, barnToWorld, BARN_FLOOR_Y, FLOOR_TOP } from './barn';
+import { barn, barnToWorld, BARN_FLOOR_Y, FLOOR_TOP, LOFT_SURFACE } from './barn';
 import { addInteractable } from '../player/interact';
 import { character } from '../player/rig';
 import * as economy from '../core/economy';
@@ -33,7 +33,8 @@ const EMBER    = new THREE.MeshBasicMaterial({ color:0xFF9A3C, transparent:true,
 const STEAM    = new THREE.MeshBasicMaterial({ color:0xFFFFFF, transparent:true,
   opacity:0.35, depthWrite:false });
 
-const LOFT_TOP = 2.65 + 0.08;
+/** the loft floor, barn-local — the barn keeps the number now */
+const LOFT_TOP = LOFT_SURFACE;
 
 interface Rig {
   group: THREE.Group;

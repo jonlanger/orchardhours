@@ -33,6 +33,40 @@ export const camRight = new THREE.Vector3(1,0,0);
 const blockers: THREE.Object3D[] = [];
 export function addCameraBlocker(o: THREE.Object3D){ blockers.push(o); }
 
+/* ============================================================
+   Tight framing.
+
+   A barn is four metres to the rafters and a loft is half that; the orchard
+   frame does not fit in either. These borrow a closer, flatter view for as
+   long as the bear is somewhere small, and hand the player's own settings
+   back untouched the moment it steps out again.
+   ============================================================ */
+const INDOOR_DIST = 5.6, INDOOR_PITCH = 0.34;
+/** the loft is barely three metres deep and has a metre and a half of headroom:
+    stand any further back and the rig is out over the barn floor, looking at
+    the bear across the top of a wall */
+const LOFT_DIST = 3.9, LOFT_PITCH = 0.22;
+const LADDER_DIST = 4.6, LADDER_PITCH = 0.06;
+/** climbing, the rig watches the bear's back rather than the top of its hat:
+    a ladder indoors has a ceiling over it, and there is no height to spare */
+const LADDER_AIM = 0.55;
+
+let indoors = false, upInTheLoft = false, onLadder = false;
+/** the barn says when the bear is under its roof, and when it is up in the loft */
+export function setIndoors(v: boolean, loft = false){ indoors = v; upInTheLoft = v && loft; }
+/** and the controller says when it is on a ladder */
+export function setClimbing(v: boolean){ onLadder = v; }
+
+/**
+ * Swing round to look at the bear's back as it starts up a ladder. It faces
+ * into the rungs, so behind it is the open room — the one direction with
+ * anything to see from.
+ */
+export function frameClimb(ry: number){
+  cam.yaw = ry + Math.PI;
+  cam.pitch = Math.min(cam.pitch, LADDER_PITCH);
+}
+
 const target = new THREE.Vector3();
 const desired = new THREE.Vector3();
 const rayDir = new THREE.Vector3();
@@ -74,14 +108,28 @@ export function updateCamera(dt: number){
 
   /* the point the rig orbits */
   target.copy(character.position);
-  target.y += HEAD_HEIGHT;
+  target.y += onLadder ? HEAD_HEIGHT*LADDER_AIM : HEAD_HEIGHT;
   target.add(cam.pan);
 
+  /* the frame this instant: the player's own settings, borrowed against
+     whatever room the bear is actually standing in */
+  let pitch = cam.pitch, goal = cam.distGoal;
+  if(onLadder){
+    goal = Math.min(goal, LADDER_DIST);
+    pitch = Math.min(pitch, LADDER_PITCH);
+  } else if(upInTheLoft){
+    goal = Math.min(goal, LOFT_DIST);
+    pitch = Math.min(pitch, LOFT_PITCH);
+  } else if(indoors){
+    goal = Math.min(goal, INDOOR_DIST);
+    pitch = Math.min(pitch, INDOOR_PITCH);
+  }
+
   /* where we would sit with nothing in the way */
-  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
   desired.set(Math.sin(cam.yaw)*cp, sp, Math.cos(cam.yaw)*cp);
 
-  let dist = cam.distGoal;
+  let dist = goal;
   if(blockers.length){
     rayDir.copy(desired);
     ray.set(target, rayDir);
@@ -91,10 +139,14 @@ export function updateCamera(dt: number){
   }
   /* pulling in snaps, easing back out is gentle — no lurching in doorways */
   cam.dist = dist < cam.dist ? dist : cam.dist + (dist - cam.dist)*Math.min(1, dt*3);
-  /* nose-to-nose with the bear helps nobody: lift the eye and look over it */
-  if(cam.dist < 3.0) cam.pitch = Math.max(cam.pitch, 0.22 + (3.0 - cam.dist)*0.26);
+  /* Nose-to-nose with the bear helps nobody: lift the eye and look over it.
+     Only for this frame — writing it back to cam.pitch ratchets the view
+     upward every time the bear squeezes past something and never lets go. */
+  if(cam.dist < 3.0) pitch = Math.max(pitch, 0.22 + (3.0 - cam.dist)*0.26);
 
-  desired.multiplyScalar(cam.dist).add(target);
+  const cp2 = Math.cos(pitch), sp2 = Math.sin(pitch);
+  desired.set(Math.sin(cam.yaw)*cp2, sp2, Math.cos(cam.yaw)*cp2)
+    .multiplyScalar(cam.dist).add(target);
 
   const ease = state.settings.calm ? 0.6 : 1;
   camera.position.lerp(desired, 1 - Math.pow(0.0005, dt*ease));

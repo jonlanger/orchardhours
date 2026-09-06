@@ -405,7 +405,7 @@ addInteractable({
   label: () => (state.ladder && !climbing()) ? 'Climb the ladder' : null,
   use: () => {
     const l = state.ladder!;
-    startClimb(l.x - Math.sin(l.ry)*0.30, l.z - Math.cos(l.ry)*0.30,
+    startClimb(l.x, l.z,
       groundHeightAt(l.x, l.z), groundHeightAt(l.x, l.z) + LADDER_H - 0.55, l.ry);
   },
 });

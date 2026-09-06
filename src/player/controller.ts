@@ -8,7 +8,7 @@ import { state } from '../core/save';
 import { on, emit } from '../core/bus';
 import { move as moveAxis, held, pressed } from '../core/input';
 import { takeTouchJump } from '../ui/touch';
-import { camForward, camRight } from '../core/cameraRig';
+import { camForward, camRight, setClimbing, frameClimb } from '../core/cameraRig';
 import type { Apple } from '../world/trees';
 import { surfaceAt, resolve } from '../world/collision';
 import { barnDoorPoint } from '../world/barn';
@@ -35,24 +35,52 @@ export const player = {
 };
 
 /* ---- up a ladder ---- */
-interface Climb { x: number; z: number; base: number; top: number; ry: number }
+interface Climb {
+  /** the line the bear rides while it is on the rungs */
+  x: number; z: number;
+  base: number; top: number;
+  /** the way it faces — into the ladder */
+  ry: number;
+  /** where it steps off at the top, when the top leads somewhere */
+  step: { x: number; z: number } | null;
+}
 let climb: Climb | null = null;
 const CLIMB_SPEED = 1.9;
+/** how far off the rungs the bear's middle rides, so it is not inside them */
+const RUNG_CLEARANCE = 0.30;
 
 export const climbing = () => climb !== null;
-export function startClimb(x: number, z: number, base: number, top: number, ry: number){
-  climb = { x, z, base, top, ry };
+
+/**
+ * Put the bear on a ladder.
+ *
+ * `x, z` is the ladder itself; the bear rides a little way off it, on the side
+ * it is facing from. `stepX, stepZ` is where it ends up if it climbs all the
+ * way — a loft floor, a roof deck. Without one the top of the ladder is simply
+ * the top, and it comes down again or hops off.
+ */
+export function startClimb(x: number, z: number, base: number, top: number, ry: number,
+                           stepX?: number, stepZ?: number){
+  climb = {
+    x: x - Math.sin(ry)*RUNG_CLEARANCE,
+    z: z - Math.cos(ry)*RUNG_CLEARANCE,
+    base, top, ry,
+    step: stepX === undefined || stepZ === undefined ? null : { x:stepX, z:stepZ },
+  };
   stopWalking();
   player.vel.set(0,0,0);
   player.vy = 0;
   player.grounded = false;
   character.position.y = Math.max(character.position.y, base);
+  setClimbing(true);
+  frameClimb(ry);
 }
 export function stopClimb(hop = false){
   if(!climb) return;
   climb = null;
   player.vy = hop ? 3.0 : 0;
   player.grounded = false;
+  setClimbing(false);
 }
 
 let moveTarget: THREE.Vector3 | null = null;
@@ -214,6 +242,15 @@ function updateClimb(dt: number){
     return;
   }
   if(pressed('jump')){ stopClimb(true); return; }
+
+  /* at the top with the bear still pushing upward: step off onto whatever the
+     ladder was leading to, rather than hanging there waiting to be jumped off */
+  if(c.step && p.y >= c.top - 0.03 && moveAxis.y > 0.1){
+    p.x = c.step.x;
+    p.z = c.step.z;
+    stopClimb();
+    return;
+  }
 
   p.x += (c.x - p.x)*Math.min(1, dt*8);
   p.z += (c.z - p.z)*Math.min(1, dt*8);

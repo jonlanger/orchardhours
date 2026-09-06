@@ -1,6 +1,7 @@
 /* ============================================================
    Inside the barn — the floor you walk on, the barrels the
-   season goes into, and the rack the tools hang on.
+   season goes into, the rack the tools hang on, and the stairs
+   that carry on up to the loft and out onto the roof deck.
    ============================================================ */
 import * as THREE from 'three';
 import { APPLE_TYPES, TYPE_KEYS, CRATE_CAPACITY, EXTRA_BAY_CAPACITY,
@@ -14,13 +15,17 @@ import type { Fadeable } from '../core/materials';
 import { scene } from '../core/renderer';
 import { APPLE_GEO, appleMats } from './geometry';
 import { addSolid, addPlatform } from './collision';
+import { groundHeightAt } from './ground';
 import {
   barn, barnToWorld, BARN_FLOOR_Y, FLOOR_TOP, WALL_T, DOOR_HALF,
-  doorLeaves, insideBarn, wallPanels, TRIM, ROOF_MAT, BARN_RED, INSIDE,
+  doorLeaves, insideBarn, wallPanels, roofParts, TRIM,
+  LOFT_Y, LOFT_SURFACE, LOFT_TOP, LOFT_Z, LOFT_D,
+  DECK_Y, DECK_TOP, DECK_Z1, WELL_Z0, WELL_Z1,
+  WALK_Y, WALK_TOP, CUPOLA_Z,
 } from './barn';
 import { character } from '../player/rig';
-import { startClimb } from '../player/controller';
 import { addInteractable } from '../player/interact';
+import { setIndoors } from '../core/cameraRig';
 import { carrying, putBack, take, setRackSpot, setBarrowHome, TOOLS, TOOL_ORDER } from '../player/tools';
 import { barrowHandy, barrowTotal } from '../player/picking';
 import { deposit, openBarn } from '../ui/overlays';
@@ -35,7 +40,6 @@ const OAK        = toonMat(0xB08048, true);
 const OAK_DARK   = toonMat(0x8C6234, true);
 const IRON       = toonMat(0x59606B, true);
 const SLATE      = toonMat(0x2E3A36, true);
-const HAY        = toonMat(0xD9BE7A, true);
 
 /* everything indoors hangs off this, so it inherits the barn's place and turn */
 const inside = new THREE.Group();
@@ -46,63 +50,183 @@ barn.add(inside);
 {
   const f = part(BOX(W - WALL_T*2, 0.14, D - WALL_T*2), PLANK, 0, 0.07, 0, inside);
   f.receiveShadow = true;
-  for(let i=-5;i<=5;i++){
+  for(let i=-7;i<=7;i++){
     part(BOX(0.04, 0.02, D - WALL_T*2), PLANK_DARK, i*0.72, 0.145, 0, inside);
   }
   /* a ramp of a threshold so the step in reads */
   part(BOX(DOOR_HALF*2, 0.10, 0.5), PLANK_DARK, 0, 0.05, D/2 - WALL_T - 0.22, inside);
 }
 
-/* ---- posts and ceiling beams ---- */
+/* ---- posts and beams ----
+   The front half is tied across at rafter height; the back half is open all
+   the way up to the deck, and its posts carry the deck joists instead. */
 for(const sx of [-1, 1]){
-  for(const lz of [-3.2, 0.4, 3.6]){
-    const p = part(BOX(0.18, 4.2, 0.18), BEAM, sx*(W/2 - 0.75), 2.1, lz, inside);
+  for(const [lz, h] of [[-3.2, DECK_Y - 0.30], [0.4, 4.5], [3.6, 4.5]] as const){
+    const p = part(BOX(0.18, h, 0.18), BEAM, sx*(W/2 - 1.9), h/2, lz, inside);
     p.castShadow = true;
-    const w = barnToWorld(sx*(W/2 - 0.75), lz);
+    const w = barnToWorld(sx*(W/2 - 1.9), lz);
     addSolid({ kind:'circle', x:w.x, z:w.z, r:0.20 });
   }
 }
-for(const lz of [-3.2, 0.4, 3.6]){
-  part(BOX(W - 1.2, 0.20, 0.20), BEAM, 0, 4.05, lz, inside);
+for(const lz of [0.4, 3.6]){
+  part(BOX(W - 3.4, 0.20, 0.20), BEAM, 0, 4.4, lz, inside);
 }
 
-/* ---- the hayloft over the back third ---- */
-const LOFT_Y = 2.65, LOFT_Z = -D/2 + 2.1, LOFT_D = 3.6;
+/* ============================================================
+   Stairs.
+
+   Both ladders are gone. Every way up the barn is a flight now, and a flight
+   is walked rather than used — no prompt, no key, just steps. The treads are
+   platforms rather than solids: a solid riser would shove the bear back down
+   the instant it met one, where a platform simply catches the foot as it goes
+   over. Everything is built in the flight's own frame, +z running up the
+   slope, so a run across the barn and a run along it are the same code.
+   ============================================================ */
+interface Stair { topX: number; topZ: number; top: number }
+function stair(fx: number, fz: number, ang: number, steps: number,
+               rise: number, run: number, halfW: number, base: number,
+               rails: number[] = [], onRoof = false): Stair {
+  const keep = (m: THREE.Mesh) => { if(onRoof) roofParts.push(m); return m; };
+  const g = new THREE.Group();
+  g.position.set(fx, 0, fz);
+  g.rotation.y = ang;
+  inside.add(g);
+
+  for(let i=0;i<steps;i++){
+    const top = base + rise*(i+1);
+    const z = run*(i + 0.5);
+    const t = keep(part(BOX(halfW*2, 0.10, run + 0.06), PLANK, 0, top - 0.05, z, g));
+    t.castShadow = t.receiveShadow = true;
+    /* the closed mass of the flight under the tread, so it is stairs and not
+       a stack of floating boards */
+    keep(part(BOX(halfW*2 - 0.06, Math.max(0.02, top - base - 0.10), run - 0.04), OAK_DARK,
+         0, base + (top - base - 0.10)/2, z, g));
+    const p = barnToWorld(fx + Math.sin(ang)*z, fz + Math.cos(ang)*z);
+    addPlatform({ x:p.x, z:p.z, ry:BARN_ROT + ang,
+                  hw:halfW, hd:run/2 + 0.04, top:BARN_FLOOR_Y + top });
+  }
+
+  /* a handrail down whichever sides are open to the room */
+  const rise_ = steps*rise, run_ = steps*run;
+  for(const side of rails){
+    const r = keep(part(BOX(0.07, 0.07, Math.hypot(run_, rise_) + 0.24), OAK,
+      side, base + 0.92 + rise_/2, run_/2, g));
+    r.rotation.x = -Math.atan2(rise_, run_);
+    for(let i=0;i<=steps;i+=2){
+      keep(part(BOX(0.08, 0.94, 0.08), OAK, side, base + rise*i + 0.47, run*i, g));
+    }
+  }
+
+  return { topX: fx + Math.sin(ang)*run_, topZ: fz + Math.cos(ang)*run_,
+           top: base + rise_ };
+}
+
+/* ---- the hayloft over the back of the barn ---- */
+const LOFT_FRONT = LOFT_Z + LOFT_D/2;
 {
   const deck = part(BOX(W - WALL_T*2 - 0.1, 0.16, LOFT_D), PLANK, 0, LOFT_Y, LOFT_Z, inside);
   deck.castShadow = deck.receiveShadow = true;
-  part(BOX(W - WALL_T*2 - 0.1, 0.14, 0.14), BEAM, 0, LOFT_Y - 0.14, LOFT_Z + LOFT_D/2, inside);
+  part(BOX(W - WALL_T*2 - 0.1, 0.14, 0.14), BEAM, 0, LOFT_Y - 0.14, LOFT_FRONT, inside);
   const w = barnToWorld(0, LOFT_Z);
-  addPlatform({ x:w.x, z:w.z, ry:BARN_ROT, hw:(W - WALL_T*2 - 0.1)/2, hd:LOFT_D/2, top:BARN_FLOOR_Y + LOFT_Y + 0.08 });
+  addPlatform({ x:w.x, z:w.z, ry:BARN_ROT, hw:(W - WALL_T*2 - 0.1)/2, hd:LOFT_D/2, top:LOFT_TOP });
+}
 
-  /* the fixed ladder up to it */
-  const lx = W/2 - 1.15, lz = LOFT_Z + LOFT_D/2 + 0.20;
-  for(const sx of [-1, 1]) part(BOX(0.06, LOFT_Y + 0.3, 0.06), OAK_DARK, lx + sx*0.22, (LOFT_Y + 0.3)/2, lz, inside);
-  for(let y = 0.35; y < LOFT_Y + 0.1; y += 0.32) part(BOX(0.48, 0.05, 0.05), OAK, lx, y, lz, inside);
+/* ---- the stair up to it, against the east wall ---- */
+const STAIR_X = W/2 - 0.85, STAIR_HALF = 0.55;
+{
+  const steps = 10;
+  const rise = (LOFT_SURFACE - 0.14)/steps, run = 0.335;
+  /* the foot is far enough forward that the top tread lands on the loft edge */
+  stair(STAIR_X, LOFT_FRONT + run*steps, Math.PI, steps, rise, run,
+        STAIR_HALF, 0.14, [STAIR_HALF - 0.06]);
+}
 
-  /* hay up top, and one bale tipped down onto the floor */
-  for(let i=0;i<3;i++){
-    const b = part(CYL(0.42,0.42,0.72,10), HAY, -1.6 + i*1.5, LOFT_Y + 0.50, LOFT_Z - 0.6 + (i%2)*0.7, inside);
-    b.rotation.z = Math.PI/2; b.castShadow = true; addOutline(b, 1.04);
+/* a rail along the open edge of the loft, with the stairhead left clear */
+{
+  /* wide enough that a bear coming up the flight at either edge of the treads
+     still walks through it, rather than being fended off by its own banister */
+  const gap = STAIR_X - STAIR_HALF - 0.45;
+  const x0 = -(W/2 - WALL_T), x1 = gap;
+  const cx = (x0 + x1)/2, len = x1 - x0;
+  for(const y of [0.88, 0.48]){
+    part(BOX(len, 0.07, 0.07), OAK, cx, LOFT_SURFACE + y, LOFT_FRONT, inside);
   }
-  const loose = part(CYL(0.42,0.42,0.72,10), HAY, W/2 - 1.15, 0.56, D/2 - 2.3, inside);
-  loose.rotation.z = Math.PI/2; loose.castShadow = true; addOutline(loose, 1.04);
-  const lw = barnToWorld(W/2 - 1.15, D/2 - 2.3);
-  addSolid({ kind:'circle', x:lw.x, z:lw.z, r:0.46, top:FLOOR_TOP + 0.84 });
+  for(let x = x0; x <= x1 + 0.01; x += len/Math.ceil(len/1.1)){
+    part(BOX(0.09, 0.96, 0.09), OAK, x, LOFT_SURFACE + 0.48, LOFT_FRONT, inside);
+  }
+  const w = barnToWorld(cx, LOFT_FRONT);
+  addSolid({ kind:'box', x:w.x, z:w.z, hw:len/2, hd:0.10, ry:BARN_ROT,
+             on: () => character.position.y > LOFT_TOP - 0.8
+                    && character.position.y < LOFT_TOP + 1.6 });
+}
 
-  /* a ladder-climb interactable for the loft */
-  const climbAt = barnToWorld(lx, lz + 0.5);
-  addInteractable({
-    id:'loft-ladder',
-    at: new THREE.Vector3(climbAt.x, 0, climbAt.z),
-    range: 0.95,
-    anyAngle: true,
-    label: () => character.position.y < BARN_FLOOR_Y + 1.2 ? 'Climb up to the loft' : null,
-    use: () => {
-      const at = barnToWorld(lx, lz + 0.45);
-      startClimb(at.x, at.z, FLOOR_TOP, BARN_FLOOR_Y + LOFT_Y + 0.30, BARN_ROT + Math.PI);
-    },
-  });
+/* ============================================================
+   And on up out of the loft to the roof deck — a flight along the loft,
+   a landing, and a second flight turning east through the stairwell.
+   ============================================================ */
+{
+  const halfW = 0.55;
+  const steps = 7;
+  const mid = (LOFT_SURFACE + DECK_Y)/2;
+  const riseA = (mid - LOFT_SURFACE)/steps, run = 0.343;
+  const LAND_X = -1.30, LAND_Z = (WELL_Z0 + WELL_Z1)/2;
+
+  /* up the loft, running back toward the wall */
+  stair(LAND_X, LAND_Z + halfW + run*steps, Math.PI, steps, riseA, run,
+        halfW, LOFT_SURFACE, [-(halfW - 0.06), halfW - 0.06]);
+
+  /* the half-landing it turns on */
+  {
+    const l = part(BOX(halfW*2, 0.12, halfW*2), PLANK, LAND_X, mid - 0.06, LAND_Z, inside);
+    l.castShadow = l.receiveShadow = true;
+    part(BOX(halfW*2 - 0.06, mid - LOFT_SURFACE - 0.12, halfW*2 - 0.04), OAK_DARK,
+         LAND_X, LOFT_SURFACE + (mid - LOFT_SURFACE - 0.12)/2, LAND_Z, inside);
+    const w = barnToWorld(LAND_X, LAND_Z);
+    addPlatform({ x:w.x, z:w.z, ry:BARN_ROT, hw:halfW, hd:halfW, top:BARN_FLOOR_Y + mid });
+
+    /* the two sides the flights do not use are a two-metre drop onto the loft
+       floor; rail them, the way the flights themselves are railed */
+    const onLanding = () => character.position.y > BARN_FLOOR_Y + mid - 0.8
+                         && character.position.y < BARN_FLOOR_Y + mid + 1.6;
+    for(const [ox, oz, hw, hd] of [
+      [0, -halfW, halfW, 0.05],          // the back of it
+      [-halfW, 0, 0.05, halfW],          // and the side open to the loft
+    ] as const){
+      for(const y of [0.88, 0.48]){
+        part(BOX(hw*2 || 0.07, 0.07, hd*2 || 0.07), OAK,
+             LAND_X + ox, mid + y, LAND_Z + oz, inside);
+      }
+      part(BOX(0.09, 0.96, 0.09), OAK, LAND_X + ox, mid + 0.48, LAND_Z + oz, inside);
+      const r = barnToWorld(LAND_X + ox, LAND_Z + oz);
+      addSolid({ kind:'box', x:r.x, z:r.z, hw:Math.max(hw, 0.09), hd:Math.max(hd, 0.09),
+                 ry:BARN_ROT, on:onLanding });
+    }
+  }
+
+  /* and out through the hole in the deck */
+  const riseB = (DECK_Y - mid)/steps;
+  stair(LAND_X + halfW, LAND_Z, Math.PI/2, steps, riseB, run,
+        halfW, mid, [-(halfW - 0.06), halfW - 0.06]);
+}
+
+/* ---- the plank walk along the ridge, and the steps up onto it ----
+   Nothing stands on the walk any more: the cupola has gone to the far end of
+   it, where it is the end of the path rather than a hurdle in the middle. */
+{
+  const z0 = DECK_Z1, z1 = CUPOLA_Z - 0.65;
+  const mid = (z0 + z1)/2, len = z1 - z0;
+  const walk = part(BOX(0.92, 0.10, len), PLANK, 0, WALK_Y - 0.05, mid, barn);
+  walk.castShadow = walk.receiveShadow = true;
+  roofParts.push(walk);
+  for(let z = z0 + 0.3; z < z1 - 0.2; z += 0.55){
+    roofParts.push(part(BOX(0.96, 0.05, 0.07), PLANK_DARK, 0, WALK_Y + 0.02, z, barn));
+  }
+  const p = barnToWorld(0, mid);
+  addPlatform({ x:p.x, z:p.z, ry:BARN_ROT, hw:0.46, hd:len/2, top:WALK_TOP });
+
+  /* four steps off the deck, up the little gable the front roof ends in */
+  const steps = 4, rise = (WALK_Y - DECK_Y)/steps, run = 0.35;
+  stair(0, DECK_Z1 - run*steps, 0, steps, rise, run, 0.52, DECK_Y, [], true);
 }
 
 /* ============================================================
@@ -129,10 +253,11 @@ const barrels: Barrel[] = [];
 const extraCasks: THREE.Group[] = [];
 
 /** staves, bulging at the waist the way a cooper makes them, and open on top */
-function buildCask(lx: number, lz: number, stave: THREE.MeshToonMaterial, head: THREE.Material){
+function buildCask(lx: number, lz: number, stave: THREE.MeshToonMaterial, head: THREE.Material,
+                   y = 0.14, parent: THREE.Object3D = inside){
   const g = new THREE.Group();
-  g.position.set(lx, 0.14, lz);
-  inside.add(g);
+  g.position.set(lx, y, lz);
+  parent.add(g);
 
   const staves = stave.clone();
   staves.side = THREE.DoubleSide;
@@ -200,8 +325,8 @@ function fruitBarrel(k: AppleType, lx: number, lz: number, base: number, cap: nu
 }
 
 TYPE_KEYS.forEach((k, i) => {
-  fruitBarrel(k, -W/2 + 0.95, -2.7 + i*1.55, 0, CRATE_CAPACITY, false);
-  fruitBarrel(k, -W/2 + 2.05, -2.7 + i*1.55, CRATE_CAPACITY, EXTRA_BAY_CAPACITY, true);
+  fruitBarrel(k, -W/2 + 0.95, -3.2 + i*1.6, 0, CRATE_CAPACITY, false);
+  fruitBarrel(k, -W/2 + 2.05, -3.2 + i*1.6, CRATE_CAPACITY, EXTRA_BAY_CAPACITY, true);
 });
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(0.125,0.125,0.125);
@@ -235,11 +360,19 @@ export function refreshBarrels(){
 }
 
 /* ============================================================
-   The compost barrel, by the tool rack — where the windfalls go
+   The compost barrel — outside, against the east wall.
+
+   It stands in the yard rather than in the barn: a heap of rotting windfalls
+   is not something you keep next to the fruit you are trying to sell.
    ============================================================ */
 const COMPOST_FULL = 60;
+const COMPOST_LX = W/2 + 1.15, COMPOST_LZ = 1.0;
+const compostAt = barnToWorld(COMPOST_LX, COMPOST_LZ);
+const compostGround = groundHeightAt(compostAt.x, compostAt.z);
+
 const compostHeap = (() => {
-  const g = buildCask(2.55, 2.75, OAK_DARK, OAK_DARK);
+  const g = buildCask(COMPOST_LX, COMPOST_LZ, OAK_DARK, OAK_DARK,
+                      compostGround - BARN_FLOOR_Y, barn);
   const gauge = labelBoard(g, 0x6E5238);
   const heap = part(CYL(BARREL_R*0.80, BARREL_R*0.80, 0.10, 14), toonMat(0x6B4A2C, true),
                     0, 0.30, 0, g);
@@ -258,12 +391,12 @@ const compostHeap = (() => {
   lid.rotation.z = 0.10;
   lid.position.x = 0.10;                       // ajar, and leaning
 
-  const w = barnToWorld(2.55, 2.75);
-  addSolid({ kind:'circle', x:w.x, z:w.z, r:BARREL_R + 0.05, top:FLOOR_TOP + BARREL_H });
+  addSolid({ kind:'circle', x:compostAt.x, z:compostAt.z,
+             r:BARREL_R + 0.05, top:compostGround + BARREL_H });
 
   addInteractable({
     id:'compost',
-    at: new THREE.Vector3(w.x, 0, w.z),
+    at: new THREE.Vector3(compostAt.x, 0, compostAt.z),
     range: 1.9,
     label: () => state.bruised
       ? `Tip ${state.bruised} ${state.bruised === 1 ? 'windfall' : 'windfalls'} into the compost`
@@ -330,24 +463,25 @@ on('upgrade:built', refreshBarrels);
 }
 
 /* ============================================================
-   The tool rack on the right wall
+   The tool rack, on the west wall ahead of the barrels — the east
+   wall is the stair now.
    ============================================================ */
 {
-  const lx = W/2 - 0.42;
-  const board = part(BOX(0.10, 1.5, 3.0), OAK, lx, 1.9, 1.35, inside);
+  const lx = -W/2 + 0.42;
+  const board = part(BOX(0.10, 1.5, 3.0), OAK, lx, 1.9, 4.4, inside);
   board.receiveShadow = true;
-  for(const lz of [0.4, 1.0, 1.4, 2.0, 2.4]){
-    part(CYL(0.035,0.035,0.26,6), OAK_DARK, lx - 0.16, 2.25, lz, inside).rotation.z = Math.PI/2;
+  for(const lz of [3.4, 4.0, 4.4, 5.0, 5.4]){
+    part(CYL(0.035,0.035,0.26,6), OAK_DARK, lx + 0.16, 2.25, lz, inside).rotation.z = Math.PI/2;
   }
-  part(BOX(0.06, 0.16, 3.0), OAK_DARK, lx - 0.06, 1.18, 1.35, inside);
+  part(BOX(0.06, 0.16, 3.0), OAK_DARK, lx + 0.06, 1.18, 4.4, inside);
 
   /* where each tool sits when it is hung up, in world space */
   const spots: Record<ToolId, { lx:number; lz:number; y:number; rot:[number,number,number] }> = {
-    picker:  { lx: lx - 0.30, lz: 2.40, y: 0.60, rot:[0.16, 0, 0.05] },
-    shears:  { lx: lx - 0.24, lz: 1.40, y: 2.10, rot:[0, 0, 0] },
-    lantern: { lx: lx - 0.24, lz: 0.40, y: 2.05, rot:[0, 0, 0] },
-    ladder:  { lx: lx - 0.55, lz: 3.60, y: 0.16, rot:[0.10, 0, 0.06] },
-    barrow:  { lx: -1.5,      lz: 3.60, y: 0.16, rot:[0, Math.PI*0.9, 0] },
+    picker:  { lx: lx + 0.30, lz: 5.40, y: 0.60, rot:[0.16, 0, -0.05] },
+    shears:  { lx: lx + 0.24, lz: 4.40, y: 2.10, rot:[0, 0, 0] },
+    lantern: { lx: lx + 0.24, lz: 3.40, y: 2.05, rot:[0, 0, 0] },
+    ladder:  { lx: lx + 0.55, lz: 6.10, y: 0.16, rot:[0.10, 0, -0.06] },
+    barrow:  { lx: -1.5,      lz: 5.30, y: 0.16, rot:[0, Math.PI*0.9, 0] },
   };
 
   scene.updateMatrixWorld(true);
@@ -399,7 +533,7 @@ on('upgrade:built', refreshBarrels);
   });
 
   /* a workbench with the almanac open on it */
-  const bx = 1.9, bz = -D/2 + 1.0;
+  const bx = 2.9, bz = -D/2 + 1.0;
   const bench = part(BOX(1.7, 0.10, 0.7), PLANK, bx, 0.98, bz, inside);
   bench.castShadow = true; addOutline(bench, 1.03, 0x4a3626);
   for(const ox of [-0.72, 0.72]) part(BOX(0.10, 0.85, 0.60), OAK_DARK, bx+ox, 0.55, bz, inside);
@@ -418,13 +552,13 @@ on('upgrade:built', refreshBarrels);
 
 /* ---- a stack of empty crates in the corner ---- */
 for(let i=0;i<3;i++){
-  const c = part(BOX(0.9, 0.56, 0.66), OAK, -W/2 + 1.15, 0.44 + i*0.58, D/2 - 1.5, inside);
+  const c = part(BOX(0.9, 0.56, 0.66), OAK, W/2 - 1.15, 0.44 + i*0.58, D/2 - 1.5, inside);
   c.rotation.y = (i%2)*0.09 - 0.04;
   c.castShadow = true;
   if(i === 0) addOutline(c, 1.03, 0x4a3626);
 }
 {
-  const w = barnToWorld(-W/2 + 1.15, D/2 - 1.5);
+  const w = barnToWorld(W/2 - 1.15, D/2 - 1.5);
   addSolid({ kind:'box', x:w.x, z:w.z, hw:0.48, hd:0.36, ry:BARN_ROT, top:FLOOR_TOP + 1.60 });
 }
 
@@ -433,30 +567,37 @@ for(let i=0;i<3;i++){
    the way when you are underneath it
    ============================================================ */
 const lampA = new THREE.PointLight(0xFFD9A6, 0, 12, 1.5);
-lampA.position.set(0, 3.4, -2.0);
+lampA.position.set(0, 2.35, -4.6);                    // under the loft
 inside.add(lampA);
-const lampB = new THREE.PointLight(0xFFE3C0, 0, 12, 1.5);
-lampB.position.set(0, 3.2, 3.0);
+const lampB = new THREE.PointLight(0xFFE3C0, 0, 14, 1.5);
+lampB.position.set(0, 3.8, 2.6);                      // over the open floor
 inside.add(lampB);
+const lampC = new THREE.PointLight(0xFFD9A6, 0, 11, 1.5);
+lampC.position.set(0, 4.7, -3.6);                     // up in the loft
+inside.add(lampC);
 
+/**
+ * The roof lifts off while the bear is underneath it. What counts as roof is
+ * the list the barn kept as it built — the stairs climb well past the top of
+ * the walls, and fading the treads out from under a bear that is standing on
+ * them would be a poor way to thank it for the climb.
+ */
 const roofFade: Fadeable = { mats: [], outlines: [], fade: 1 };
 {
-  const seen = new Set<THREE.Material>();
-  for(const m of [ROOF_MAT, BARN_RED, INSIDE]) void m;
-  /* the roof panels, the ridge and the gables all share ROOF_MAT/BARN_RED, and
-     fading those would take the whole barn with them — so clone per mesh */
-  barn.traverse(o => {
-    const mesh = o as THREE.Mesh;
-    if(!mesh.isMesh) return;
-    if(mesh.position.y < 4.0) return;                    // only what is above the walls
+  /* the roof shares its paint with the walls below, so it fades on its own
+     copies — one per material rather than one per mesh, or the deck alone
+     would cost sixty draw calls */
+  const clones = new Map<THREE.Material, THREE.Material>();
+  for(const mesh of roofParts){
     const mat = mesh.material as THREE.Material;
-    if(!seen.has(mat)){
-      seen.add(mat);
+    let clone = clones.get(mat);
+    if(!clone){
+      clone = (mat as THREE.MeshToonMaterial).clone();
+      clones.set(mat, clone);
+      roofFade.mats.push(clone);
     }
-    const clone = (mat as THREE.MeshToonMaterial).clone();
     mesh.material = clone;
-    roofFade.mats.push(clone);
-  });
+  }
 }
 
 const wallFades: (Fadeable & { nx:number; nz:number })[] = wallPanels.map(w => {
@@ -469,7 +610,11 @@ const _toCam = new THREE.Vector3();
 let doorOpen = 0;
 
 export function updateBarnInterior(dt: number, camPos: THREE.Vector3){
-  const here = insideBarn(character.position.x, character.position.z);
+  /* under the deck, not on top of it — otherwise walking the roof fades away
+     the very boards the bear is standing on */
+  const here = insideBarn(character.position.x, character.position.z)
+    && character.position.y < DECK_TOP - 0.35;
+  setIndoors(here, character.position.y > LOFT_TOP - 0.4);
 
   /* the doors roll aside as you come up to them, and close behind you */
   const near = character.position.distanceTo(
@@ -493,8 +638,9 @@ export function updateBarnInterior(dt: number, camPos: THREE.Vector3){
   }
 
   const warm = here ? 1 : 0;
-  lampA.intensity += (warm*2.4 - lampA.intensity)*Math.min(1, dt*3);
-  lampB.intensity += (warm*1.8 - lampB.intensity)*Math.min(1, dt*3);
+  lampA.intensity += (warm*1.9 - lampA.intensity)*Math.min(1, dt*3);
+  lampB.intensity += (warm*2.2 - lampB.intensity)*Math.min(1, dt*3);
+  lampC.intensity += (warm*1.5 - lampC.intensity)*Math.min(1, dt*3);
 }
 
 export { insideBarn };
