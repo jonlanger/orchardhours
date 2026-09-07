@@ -20,7 +20,7 @@ import {
   barn, barnToWorld, BARN_FLOOR_Y, FLOOR_TOP, WALL_T, DOOR_HALF,
   doorLeaves, insideBarn, wallPanels, roofParts, TRIM,
   LOFT_Y, LOFT_SURFACE, LOFT_TOP, LOFT_Z, LOFT_D,
-  DECK_Y, DECK_TOP, DECK_Z1, WELL_Z0, WELL_Z1,
+  DECK_Y, DECK_Z1, WELL_X1, WELL_Z0, WELL_Z1, roofOver,
   WALK_Y, WALK_TOP, CUPOLA_Z,
 } from './barn';
 import { character } from '../player/rig';
@@ -184,22 +184,16 @@ const STAIR_X = W/2 - 0.85, STAIR_HALF = 0.55;
     const w = barnToWorld(LAND_X, LAND_Z);
     addPlatform({ x:w.x, z:w.z, ry:BARN_ROT, hw:halfW, hd:halfW, top:BARN_FLOOR_Y + mid });
 
-    /* the two sides the flights do not use are a two-metre drop onto the loft
-       floor; rail them, the way the flights themselves are railed */
-    const onLanding = () => character.position.y > BARN_FLOOR_Y + mid - 0.8
-                         && character.position.y < BARN_FLOOR_Y + mid + 1.6;
+    /* a rail across the back of it and down the side open to the loft */
     for(const [ox, oz, hw, hd] of [
-      [0, -halfW, halfW, 0.05],          // the back of it
-      [-halfW, 0, 0.05, halfW],          // and the side open to the loft
+      [0, -halfW, halfW, 0.05],
+      [-halfW, 0, 0.05, halfW],
     ] as const){
       for(const y of [0.88, 0.48]){
         part(BOX(hw*2 || 0.07, 0.07, hd*2 || 0.07), OAK,
              LAND_X + ox, mid + y, LAND_Z + oz, inside);
       }
       part(BOX(0.09, 0.96, 0.09), OAK, LAND_X + ox, mid + 0.48, LAND_Z + oz, inside);
-      const r = barnToWorld(LAND_X + ox, LAND_Z + oz);
-      addSolid({ kind:'box', x:r.x, z:r.z, hw:Math.max(hw, 0.09), hd:Math.max(hd, 0.09),
-                 ry:BARN_ROT, on:onLanding });
     }
   }
 
@@ -207,6 +201,26 @@ const STAIR_X = W/2 - 0.85, STAIR_HALF = 0.55;
   const riseB = (DECK_Y - mid)/steps;
   stair(LAND_X + halfW, LAND_Z, Math.PI/2, steps, riseB, run,
         halfW, mid, [-(halfW - 0.06), halfW - 0.06]);
+
+  /* What holds the bear on all of it.
+     The landing is a shelf two metres over the loft and the flight beyond it
+     climbs out through a hole in the roof, so both are railed down their open
+     sides — as one run each, from the landing to the deck. A guard that
+     stopped at the landing's corner would stand across the flight instead of
+     alongside it, and fend off the bear coming down. The two ends the stairs
+     themselves use are left open. */
+  const onTheStair = () => character.position.y > BARN_FLOOR_Y + mid - 0.9;
+  for(const [x0, z0, x1, z1] of [
+    [LAND_X - halfW, WELL_Z0 + 0.02, WELL_X1 + 0.06, WELL_Z0 + 0.02],   // the north side, all of it
+    [LAND_X + halfW, WELL_Z1 - 0.02, WELL_X1 + 0.06, WELL_Z1 - 0.02],   // the south side of the flight
+    [LAND_X - halfW, WELL_Z0 + 0.02, LAND_X - halfW, WELL_Z1 - 0.02],   // and the far end of the landing
+  ] as const){
+    const w = barnToWorld((x0 + x1)/2, (z0 + z1)/2);
+    addSolid({ kind:'box', x:w.x, z:w.z,
+               hw:Math.max(Math.abs(x1 - x0)/2, 0.06),
+               hd:Math.max(Math.abs(z1 - z0)/2, 0.06),
+               ry:BARN_ROT, on:onTheStair });
+  }
 }
 
 /* ---- the plank walk along the ridge, and the steps up onto it ----
@@ -610,10 +624,12 @@ const _toCam = new THREE.Vector3();
 let doorOpen = 0;
 
 export function updateBarnInterior(dt: number, camPos: THREE.Vector3){
-  /* under the deck, not on top of it — otherwise walking the roof fades away
-     the very boards the bear is standing on */
-  const here = insideBarn(character.position.x, character.position.z)
-    && character.position.y < DECK_TOP - 0.35;
+  /* under the roof, not on top of it — otherwise walking the roof fades away
+     the very boards the bear is standing on. The roof is not one height: it is
+     the deck over the back and a gambrel over the front, so ask it. */
+  const { x: px, z: pz } = character.position;
+  const here = insideBarn(px, pz)
+    && character.position.y < BARN_FLOOR_Y + roofOver(px, pz) - 0.35;
   setIndoors(here, character.position.y > LOFT_TOP - 0.4);
 
   /* the doors roll aside as you come up to them, and close behind you */

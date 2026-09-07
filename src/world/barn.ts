@@ -72,8 +72,16 @@ export const DECK_HALF_W = KNEE_X;
 const DECK_Z0 = -D/2 + WALL_T;
 export const DECK_Z1 = -0.10;
 /** the stairwell the deck stair comes up through */
-const WELL_X0 = -0.85, WELL_X1 = 1.65;
-export const WELL_Z0 = -6.40, WELL_Z1 = -5.20;
+const WELL_X0 = -0.85;
+/** the mouth the deck stair comes out of, which is also where its rails end */
+export const WELL_X1 = 1.65;
+/**
+ * The stairwell is a notch out of the back edge of the deck rather than an
+ * island hole in it. The strip that would otherwise be left between the hole
+ * and the parapet is narrower than a bear, so a bear pressed against the
+ * parapet would have been standing over the drop.
+ */
+export const WELL_Z0 = DECK_Z0, WELL_Z1 = DECK_Z0 + 1.20;
 
 /** the hayloft, over the back of the barn and under the deck */
 export const LOFT_Y = 2.80;
@@ -151,10 +159,28 @@ function roofPanel(sx: number, x1: number, y1: number, x2: number, y2: number,
   barn.add(p);
   roofPart(p);
 }
+/**
+ * And the same pitch as something to stand on. Without these the roof is a
+ * picture: a bear that steps a hand's breadth off the ridge walk finds nothing
+ * under it and drops through the slates onto the barn floor.
+ */
+function roofSlope(sx: number, x1: number, y1: number, x2: number, y2: number,
+                   z1: number, z2: number){
+  const cx = sx*(x1 + x2)/2, cz = (z1 + z2)/2;
+  const p = barnToWorld(cx, cz);
+  addPlatform({
+    x:p.x, z:p.z, ry:BARN_ROT,
+    hw: Math.abs(x2 - x1)/2, hd: (z2 - z1)/2,
+    top: BARN_FLOOR_Y + H + (y1 + y2)/2,
+    slopeX: sx*(y2 - y1)/(x2 - x1),
+  });
+}
 const BACK_Z = -D/2 - 0.28, FRONT_Z = D/2 + 0.28;
 for(const sx of [1, -1]){
   roofPanel(sx, EAVE_X, 0, KNEE_X, KNEE_Y, 0.42, BACK_Z, FRONT_Z);       // full length
   roofPanel(sx, KNEE_X, KNEE_Y, 0, PEAK_Y, 0.20, DECK_Z1, FRONT_Z);      // front half only
+  roofSlope(sx, EAVE_X, 0, KNEE_X, KNEE_Y, BACK_Z, FRONT_Z);
+  roofSlope(sx, KNEE_X, KNEE_Y, 0, PEAK_Y, DECK_Z1, FRONT_Z);
 }
 {
   const ridge = new THREE.Mesh(BOX(0.30, 0.22, FRONT_Z - DECK_Z1), toonMat(0x3F4750));
@@ -200,6 +226,16 @@ gableShape.lineTo(-KNEE_X, KNEE_Y); gableShape.closePath();
       i*0.62, H + KNEE_Y + (0.9 - Math.abs(i)*0.26)/2, DECK_Z1 - 0.05, barn);
     roofPart(b);
   }
+  /* And it holds, either side of the steps that climb over it. The pitch
+     behind it rises faster than a bear can step, so without this the front
+     edge of the deck was a hole: walk into the gable and you went through it,
+     found the roof too high to stand on, and fell into the barn. */
+  for(const sx of [-1, 1]){
+    const x0 = sx*0.60, x1 = sx*KNEE_X;
+    const w = barnToWorld((x0 + x1)/2, DECK_Z1 - 0.05);
+    addSolid({ kind:'box', x:w.x, z:w.z, hw:Math.abs(x1 - x0)/2, hd:0.09,
+               ry:BARN_ROT, on:upOnTheRoof });
+  }
 }
 /* battens carry on up the front gable */
 for(let i=-3;i<=3;i++){
@@ -226,7 +262,6 @@ function deckSlab(x0: number, x1: number, z0: number, z1: number){
   const p = barnToWorld(cx, cz);
   addPlatform({ x:p.x, z:p.z, ry:BARN_ROT, hw:w/2, hd:d/2, top:DECK_TOP });
 }
-deckSlab(-DECK_HALF_W, DECK_HALF_W, DECK_Z0,  WELL_Z0);
 deckSlab(-DECK_HALF_W, DECK_HALF_W, WELL_Z1,  DECK_Z1);
 deckSlab(-DECK_HALF_W, WELL_X0,     WELL_Z0,  WELL_Z1);
 deckSlab( WELL_X1, DECK_HALF_W,     WELL_Z0,  WELL_Z1);
@@ -241,12 +276,14 @@ for(const sx of [-1, 1]){
   roofPart(part(BOX(0.10, 0.34, DECK_Z1 - DECK_Z0), TRIM,
     sx*(DECK_HALF_W + 0.05), DECK_Y - 0.17, (DECK_Z0 + DECK_Z1)/2, barn));
 }
-/* and a coaming round the stairwell, so the hole reads as a way down */
+/* A coaming round the stairwell, on the two sides that are deck — the back of
+   it is the parapet, and the mouth is where the stair comes out. It holds, and
+   only once the bear is up level with the deck: lower than that it would fend
+   off the very bear climbing out through it. */
 {
   const cz = (WELL_Z0 + WELL_Z1)/2, cx = (WELL_X0 + WELL_X1)/2;
-  for(const sz of [WELL_Z0 - 0.06, WELL_Z1 + 0.06]){
-    roofPart(part(BOX(WELL_X1 - WELL_X0 + 0.24, 0.14, 0.12), DECK_DARK, cx, DECK_Y + 0.07, sz, barn));
-  }
+  roofPart(part(BOX(WELL_X1 - WELL_X0 + 0.24, 0.14, 0.12), DECK_DARK,
+    cx, DECK_Y + 0.07, WELL_Z1 + 0.06, barn));
   roofPart(part(BOX(0.12, 0.14, WELL_Z1 - WELL_Z0 + 0.24), DECK_DARK,
     WELL_X0 - 0.06, DECK_Y + 0.07, cz, barn));
 }
@@ -284,19 +321,20 @@ railRun(DECK_HALF_W, DECK_Z0 + 0.1, DECK_HALF_W, DECK_Z1);
 /* west side, in two runs with the bridge between them */
 railRun(-DECK_HALF_W, DECK_Z0 + 0.1, -DECK_HALF_W, BRIDGE_Z - BRIDGE_HALF);
 railRun(-DECK_HALF_W, BRIDGE_Z + BRIDGE_HALF, -DECK_HALF_W, DECK_Z1);
-/* the back is the parapet of the truncated gable; give it a rail to match */
-railRun(-DECK_HALF_W, DECK_Z0 + 0.1, DECK_HALF_W, DECK_Z0 + 0.1);
+/* The back needs no rail of its own: the truncated gable stands a good half
+   metre proud of the boards with a coping along it, which is what a parapet
+   is. It holds, and it holds far enough forward that a bear leaning on it is
+   not leaning over the stairwell that opens beside it. */
 {
-  /* and the back parapet itself holds, low as it is */
-  const w = barnToWorld(0, DECK_Z0 + 0.05);
-  addSolid({ kind:'box', x:w.x, z:w.z, hw:DECK_HALF_W, hd:0.12, ry:BARN_ROT, on:upOnTheRoof });
+  const w = barnToWorld(0, DECK_Z0 - 0.06);
+  addSolid({ kind:'box', x:w.x, z:w.z, hw:DECK_HALF_W, hd:0.06, ry:BARN_ROT, on:upOnTheRoof });
 }
 
 /* ============================================================
    The roof room — a boarded shed at the back of the deck, open to
    walk into, with a window looking west over the rows.
    ============================================================ */
-const SHED_X0 = -3.15, SHED_X1 = -0.65, SHED_Z0 = -6.65, SHED_Z1 = -4.45;
+const SHED_X0 = -3.15, SHED_X1 = -1.10, SHED_Z0 = -6.65, SHED_Z1 = -4.45;
 {
   const T = 0.14, HGT = 2.00;
   const cx = (SHED_X0 + SHED_X1)/2, cz = (SHED_Z0 + SHED_Z1)/2;
@@ -465,13 +503,35 @@ addPlatform({
   hw: W/2 - WALL_T, hd: D/2 - WALL_T, top: FLOOR_TOP,
 });
 
-/** is this point in under the barn roof? */
-export function insideBarn(x: number, z: number){
+const _local = { lx: 0, lz: 0 };
+/** a world point back in the barn's own frame */
+function barnFromWorld(x: number, z: number){
   const dx = x - barn.position.x, dz = z - barn.position.z;
   /* the inverse of barnToWorld — a turn of +BARN_ROT, not -BARN_ROT */
-  const lx = dx*_c - dz*_s;
-  const lz = dx*_s + dz*_c;
-  return Math.abs(lx) < W/2 && Math.abs(lz) < D/2;
+  _local.lx = dx*_c - dz*_s;
+  _local.lz = dx*_s + dz*_c;
+  return _local;
+}
+
+/** is this point in under the barn roof? */
+export function insideBarn(x: number, z: number){
+  const l = barnFromWorld(x, z);
+  return Math.abs(l.lx) < W/2 && Math.abs(l.lz) < D/2;
+}
+
+/**
+ * How far above the barn floor the roof is at this point — the gambrel over
+ * the front, the deck over the back. Being under it is what indoors means:
+ * a flat height would call a bear standing on the pitch, six metres up and
+ * out in the weather, indoors, and fade the very slates it stood on.
+ */
+export function roofOver(x: number, z: number){
+  const l = barnFromWorld(x, z);
+  const ax = Math.abs(l.lx);
+  if(ax >= EAVE_X) return H;
+  if(ax >= KNEE_X) return H + KNEE_Y*(EAVE_X - ax)/(EAVE_X - KNEE_X);
+  return l.lz < DECK_Z1 ? DECK_Y
+                        : H + KNEE_Y + (PEAK_Y - KNEE_Y)*(KNEE_X - ax)/KNEE_X;
 }
 
 /* hay bales — low enough to hop onto */

@@ -25,8 +25,18 @@ export interface Solid {
 export const solids: Solid[] = [];
 export function addSolid(s: Solid){ solids.push(s); return s; }
 
-/** flat surfaces you can land on that block nothing: barn floors, loft decks */
-export interface Platform { x: number; z: number; hw: number; hd: number; ry?: number; top: number }
+/** surfaces you can land on that block nothing: barn floors, loft decks, roof pitches */
+export interface Platform {
+  x: number; z: number; hw: number; hd: number; ry?: number;
+  /** the height at its middle */
+  top: number;
+  /**
+   * A roof is not a shelf. These are the rise per metre along the platform's
+   * own +x and +z, so a whole pitch is one sloping surface rather than a
+   * flight of invisible steps — or, as it was, nothing at all.
+   */
+  slopeX?: number; slopeZ?: number;
+}
 export const platforms: Platform[] = [];
 export function addPlatform(p: Platform){ platforms.push(p); return p; }
 
@@ -63,8 +73,12 @@ export function surfaceAt(x: number, z: number, y: number){
   let h = groundHeightAt(x, z);
   const ceiling = y + STEP_UP;
   for(const p of platforms){
-    if(p.top <= h || p.top > ceiling) continue;
-    if(inBox(x, z, { x:p.x, z:p.z, ry:p.ry, hw:p.hw, hd:p.hd })) h = p.top;
+    const l = toLocal(x, z, p);
+    if(Math.abs(l.x) > p.hw || Math.abs(l.y) > p.hd) continue;
+    /* the height under the foot, not the height at the middle */
+    const top = p.top + (p.slopeX ?? 0)*l.x + (p.slopeZ ?? 0)*l.y;
+    if(top <= h || top > ceiling) continue;
+    h = top;
   }
   for(const s of solids){
     if(s.top === undefined || s.top <= h || s.top > ceiling) continue;
